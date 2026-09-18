@@ -768,3 +768,12 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 .swatch[data-preview="grape"] .swatch-dot { background: linear-gradient(135deg, #7C5CD6, #513A93); }
 .swatch[data-preview="ember"] .swatch-dot { background: linear-gradient(135deg, #D2542F, #8D3316); }
 .sample-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+/* ---------- hints and explanations from Gemini ---------- */
+.ai-note { margin-top: 12px; padding: 14px 16px; border-radius: 12px; background: var(--accent-soft); color: var(--ink); border-left: 3px solid var(--accent); }
+.ai-note strong { display: block; font-family: var(--display); font-size: 15px; margin-bottom: 4px; color: var(--accent-ink); }
+.ai-note p { margin-bottom: 0.5em; }
+.ai-note small { display: block; margin-top: 8px; color: var(--muted); font-size: 12.5px; }
+.ai-note.thinking { color: var(--muted); font-style: italic; }
+.ai-note.bad { background: var(--low-soft); border-left-color: var(--low); color: var(--ink); }
+.mistake-body .ai-note { margin-top: 0; }

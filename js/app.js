@@ -6,6 +6,7 @@ import {
 import { EXAMS, EXAM_IDS, examOfQuestion, scoredSections, sectionOf, skillsOf, totalScore } from './exams.js';
 import { addMistake, dueMistakes, reviewMistake } from './srs.js';
 import { applySettings, CHOICES, loadSettings, saveSettings } from './settings.js';
+import { explainConfigured, explainQuestion, hintFor } from './explain.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
 import { mountCalculator } from './calc.js';
 import {
@@ -548,6 +549,39 @@ function bindReasonPicker(qid) {
   });
 }
 
+// ---------- hints and explanations from Gemini ----------
+
+// Available only when Firebase is configured and the student hasn't turned it off in Settings.
+const aiReady = () => explainConfigured && settings.explain === 'on';
+
+const aiNoteHtml = () => (aiReady() ? '<div class="ai-note" hidden></div>' : '');
+
+// Runs one request and shows the answer under the question. The button stays put and reports its own progress,
+// so a slow reply never looks like nothing happened.
+async function showAi(button, note, run, label) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Thinking…';
+  note.hidden = false;
+  note.className = 'ai-note thinking';
+  note.textContent = 'Asking Gemini…';
+  try {
+    const text = await run();
+    if (!note.isConnected) return;
+    note.className = 'ai-note';
+    note.innerHTML = `<strong>${esc(label)}</strong>${para(text)}<small>Written by Gemini, so it can be wrong — check it against the explanation.</small>`;
+  } catch (err) {
+    if (!note.isConnected) return;
+    note.className = 'ai-note bad';
+    note.textContent = err.message;
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
+}
+
 const newDrillState = () => ({ selected: null, eliminated: new Set(), revealed: false, correct: null, shownAt: Date.now() });
 
 // One-question-at-a-time flow with instant feedback, shared by practice and review.
@@ -559,7 +593,17 @@ function renderDrill(headerHtml, source, rerender) {
     ${st.correct === false ? reasonPicker(q.id) : ''}
     <div class="actions">${awaitingSelfMark ? ''
       : st.revealed ? '<button class="primary" id="next">Next question</button>'
-      : `<button class="primary" id="check" ${st.selected == null ? 'disabled' : ''}>Check answer</button>`}</div>`;
+      : `<button class="primary" id="check" ${st.selected == null ? 'disabled' : ''}>Check answer</button>`}
+      ${aiReady() && !st.revealed ? '<button class="ghost small" id="hint">Give me a hint</button>' : ''}
+      ${aiReady() && st.revealed && st.correct != null ? '<button class="ghost small" id="explain">Explain this</button>' : ''}
+    </div>
+    ${aiNoteHtml()}`;
+
+  if (aiReady()) {
+    on('#hint', 'click', e => showAi(e.currentTarget, $('.ai-note'), () => hintFor(q, { examName: exam.name }), 'Hint'));
+    on('#explain', 'click', e => showAi(e.currentTarget, $('.ai-note'),
+      () => explainQuestion(q, { chosen: st.selected, correct: st.correct, examName: exam.name }), 'Explanation'));
+  }
 
   const finish = correct => {
     st.correct = record(q, st.selected, source, Date.now() - st.shownAt, correct);
@@ -879,7 +923,8 @@ function viewMistakes(arg) {
             <div class="mistake-body" data-qid="${esc(id)}">
               ${questionHtml(q, { selected: missed?.choice ?? null, revealed: true, correct: false, hideMeta: true })}
               ${reasonPicker(id)}
-              <div class="actions"><button class="small" data-practice-skill="${esc(q.skill)}" data-practice-section="${q.section}">Practice this skill</button></div>
+              <div class="actions"><button class="small" data-practice-skill="${esc(q.skill)}" data-practice-section="${q.section}">Practice this skill</button>${aiReady() ? '<button class="small ghost" data-explain>Explain this</button>' : ''}</div>
+              ${aiNoteHtml()}
             </div>
           </details>
         </li>`;
@@ -899,6 +944,13 @@ function viewMistakes(arg) {
     entry.updatedAt = Date.now();
     save();
     body.querySelectorAll('[data-reason]').forEach(b => b.classList.toggle('active', b === e.currentTarget));
+  });
+  on('.mistake-body [data-explain]', 'click', e => {
+    const body = e.currentTarget.closest('.mistake-body');
+    const q = byId.get(body.dataset.qid);
+    const missed = lastMiss(body.dataset.qid);
+    showAi(e.currentTarget, body.querySelector('.ai-note'),
+      () => explainQuestion(q, { chosen: missed?.choice ?? null, correct: false, examName: exam.name }), 'Explanation');
   });
   on('#drill', 'click', () => go('mistakes/go'));
 }
@@ -1754,6 +1806,7 @@ const SETTING_GROUPS = [
   ['textsize', 'Text size', 'Scales the questions, passages and everything else.'],
   ['contrast', 'Contrast', 'Turn this up if text or borders are hard to make out.'],
   ['motion', 'Animation', 'How much the app moves as pages and answers appear.'],
+  ['explain', 'Explain with AI', 'A hint before you answer, and an explanation afterwards, written by Google’s Gemini. Questions you ask about are sent to Google.'],
 ];
 
 function viewSettings() {
@@ -1761,7 +1814,7 @@ function viewSettings() {
     ${pageHead('Settings', { eyebrow: APP_NAME })}
     <p class="muted">These settings belong to this device, not your account, so a phone and a laptop can each be set up the way that suits them.</p>
     <div class="settings-grid">
-      ${SETTING_GROUPS.map(([key, title, note]) => `
+      ${SETTING_GROUPS.filter(([key]) => key !== 'explain' || explainConfigured).map(([key, title, note]) => `
         <section class="card setting">
           <h2 id="set-${key}">${title}</h2>
           <p class="hint">${note}</p>

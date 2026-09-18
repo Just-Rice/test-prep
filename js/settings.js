@@ -7,7 +7,7 @@
 
 const KEY = 'satprep.settings.v1';
 
-export const DEFAULTS = { theme: 'system', accent: 'pencil', textsize: 'medium', contrast: 'normal', motion: 'full' };
+export const DEFAULTS = { theme: 'system', accent: 'pencil', textsize: 'medium', contrast: 'normal', motion: 'full', explain: 'on' };
 
 // [value, label, description] for each setting, in the order the Settings page shows them.
 export const CHOICES = {
@@ -36,6 +36,11 @@ export const CHOICES = {
   motion: [
     ['full', 'Full', 'Pages, cards and answers animate as they appear.'],
     ['reduced', 'Reduced', 'Almost no movement. Turned on automatically if your device asks for reduced motion.'],
+  ],
+  // Turning this off means nothing is ever sent to Gemini, and the AI code is never even downloaded.
+  explain: [
+    ['on', 'On', 'Ask for a hint before answering, or an explanation afterwards.'],
+    ['off', 'Off', 'No AI help, and nothing about your questions leaves this device.'],
   ],
 };
 
