@@ -1,9 +1,12 @@
 // A small set of original questions (not College Board content) so every feature can be tried before
 // any exports are imported. They follow the SAT's skill categories but are far easier to exhaust.
 
-const mc = (id, section, domain, skill, difficulty, stem, choices, answer, rationale, passage) => ({
+// `underline` lists the exact phrases a question refers to as underlined, so the app can underline them again
+// (question text itself is stored as plain text).
+const mc = (id, section, domain, skill, difficulty, stem, choices, answer, rationale, passage, underline) => ({
   id: `demo-${id}`, section, domain, skill, difficulty, passage, stem,
   choices: choices.map((text, i) => ({ letter: 'ABCD'[i], text })), answer, rationale, source: 'demo',
+  underline: underline || null,
 });
 const spr = (id, section, domain, skill, difficulty, stem, answer, rationale) => ({
   id: `demo-${id}`, section, domain, skill, difficulty, stem, choices: null, answer, rationale, source: 'demo',
@@ -95,5 +98,6 @@ export const DEMO_QUESTIONS = [
     'Which choice best describes the function of the underlined second sentence in the overall structure of the text?',
     ['It offers a counterpoint to the critics\' view by explaining a purpose of the novel\'s style.', 'It gives an example of a complaint made by the critics.', 'It summarizes the events of the novel\'s plot.', 'It questions whether the novel has a clear narrator.'], 'A',
     '"Yet" signals a contrast with the critics, and the sentence explains that the plain sentences serve a purpose: building a rhythm that mirrors the narrator\'s anxiety.',
-    'Some critics dismissed the novel as simplistic. Yet its short sentences, which at first seem plain, gradually build a rhythm that mirrors the narrator\'s growing anxiety.'),
+    'Some critics dismissed the novel as simplistic. Yet its short sentences, which at first seem plain, gradually build a rhythm that mirrors the narrator\'s growing anxiety.',
+    ['Yet its short sentences, which at first seem plain, gradually build a rhythm that mirrors the narrator\'s growing anxiety.']),
 ];

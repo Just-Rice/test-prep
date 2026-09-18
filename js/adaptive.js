@@ -64,14 +64,17 @@ export function nextPlacementQuestion(pool, answered, section) {
 
 // ---- Practice ----
 
-export function nextPracticeQuestion(pool, progress, section, { skill, exam = EXAMS.sat } = {}) {
+// `exclude` holds the questions already served in this practice run. Nothing comes back until everything
+// available has been served, and the caller then starts a fresh cycle (see app.js), so a question is never
+// repeated while unseen ones are still waiting.
+export function nextPracticeQuestion(pool, progress, section, { skill, exam = EXAMS.sat, exclude } = {}) {
   const grade = progress.profile.mode === 'grade' && !progress.placement?.[section] ? progress.profile.grade : null;
   const allowed = new Set((grade ? skillsForGradeOf(exam, section, grade) : skillsOf(exam, section)).map(s => s.name));
   if (skill) allowed.add(skill); // a skill the student picks themselves is served regardless of grade
   const abilities = skillAbilities(progress, section, exam).filter(s => allowed.has(s.name));
 
   const lastSeen = new Map(progress.responses.map(r => [r.qid, r.at]));
-  const available = pool.filter(q => q.section === section && allowed.has(q.skill));
+  const available = pool.filter(q => q.section === section && allowed.has(q.skill) && !exclude?.has(q.id));
   if (!available.length) return null;
 
   let skillName = skill;
@@ -84,8 +87,9 @@ export function nextPracticeQuestion(pool, progress, section, { skill, exam = EX
   const est = abilities.find(s => s.name === skillName) || sectionAbility(progress, section, exam);
   const inSkill = available.filter(q => q.skill === skillName);
   const unseen = inSkill.filter(q => !lastSeen.has(q.id));
-  const choices = unseen.length ? unseen : [...inSkill].sort((a, c) => lastSeen.get(a.id) - lastSeen.get(c.id)).slice(0, Math.ceil(inSkill.length / 2));
-  return closestTo(choices, targetDifficulty(est.theta));
+  // Once every question in the skill has been answered before, the least recently seen half comes round again.
+  const stale = [...inSkill].sort((a, c) => (lastSeen.get(a.id) ?? 0) - (lastSeen.get(c.id) ?? 0)).slice(0, Math.ceil(inSkill.length / 2));
+  return closestTo(unseen.length ? unseen : stale, targetDifficulty(est.theta));
 }
 
 // ---- Timed practice tests ----
@@ -111,7 +115,8 @@ export function buildModule(pool, section, route, exclude = new Set(), size = TE
   // Fill any shortfall (small imports, rounding) from whatever remains.
   const used = new Set(picked.map(q => q.id));
   const rest = shuffle(pool.filter(q => q.section === section && !exclude.has(q.id) && !used.has(q.id)));
-  const module = [...picked, ...rest].slice(0, size);
+  // One copy of each question: a repeat inside a module is never useful, whatever the rounding above did.
+  const module = [...new Map([...picked, ...rest].map(q => [q.id, q])).values()].slice(0, size);
   // Order roughly easy to hard within each domain block, like the real test.
   const order = q => Object.keys(shares).indexOf(q.domain);
   return module.sort((a, c) => order(a) - order(c) || b(a) - b(c));

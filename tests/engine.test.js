@@ -137,6 +137,32 @@ test('timed modules can be built smaller for a small library', () => {
   assert.ok(second.every(q => !first.includes(q)));
 });
 
+test('practice serves every question once before any of them comes round again', () => {
+  const progress = { ...blankProgress(), profile: { mode: 'grade', grade: 12 } };
+  const math = DEMO_QUESTIONS.filter(q => q.section === 'MATH');
+  const served = new Set();
+  for (let k = 0; k < math.length; k++) {
+    const q = nextPracticeQuestion(DEMO_QUESTIONS, progress, 'MATH', { exclude: served });
+    assert.ok(q, `a question was still available on turn ${k + 1}`);
+    assert.ok(!served.has(q.id), `${q.id} was served twice`);
+    served.add(q.id);
+  }
+  assert.equal(served.size, math.length);
+  assert.equal(nextPracticeQuestion(DEMO_QUESTIONS, progress, 'MATH', { exclude: served }), null,
+    'nothing is left once every question has been served');
+});
+
+test('questions that refer to underlined text say which text is underlined', () => {
+  for (const q of DEMO_QUESTIONS) {
+    for (const part of q.underline || []) {
+      assert.ok(`${q.passage ?? ''}\n${q.stem ?? ''}`.includes(part), `${q.id}: underlined text is not in the question`);
+    }
+  }
+  const askAboutUnderline = DEMO_QUESTIONS.filter(q => /underlined/i.test(q.stem || ''));
+  assert.ok(askAboutUnderline.length, 'a demo question refers to underlined text');
+  for (const q of askAboutUnderline) assert.ok(q.underline?.length, `${q.id}: asks about underlined text but marks none`);
+});
+
 test('a skill the student picks is served even above their grade', () => {
   const progress = { ...blankProgress(), profile: { mode: 'grade', grade: 8 } };
   const advanced = DEMO_QUESTIONS.find(q => q.section === 'MATH' && findSkill(q.skill).minGrade > 8);

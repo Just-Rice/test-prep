@@ -5,6 +5,7 @@ import {
 } from './adaptive.js';
 import { EXAMS, EXAM_IDS, examOfQuestion, scoredSections, sectionOf, skillsOf, totalScore } from './exams.js';
 import { addMistake, dueMistakes, reviewMistake } from './srs.js';
+import { applySettings, CHOICES, loadSettings, saveSettings } from './settings.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
 import { mountCalculator } from './calc.js';
 import {
@@ -36,12 +37,25 @@ let session = null;     // the active placement, practice or review session
 let test = null;        // the timed practice test, kept separately so browsing other pages doesn't end it
 let currentRoute = null;
 let ticker = null;
+let settings = loadSettings();
+applySettings(settings);
 
 // ---------- helpers ----------
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const para = t => esc(t).split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
 const inline = t => esc(t).replace(/\n/g, '<br>');
+
+// Reading questions often ask about an underlined word, phrase or sentence. Question text is stored as plain
+// text, so each question carries the exact strings that were underlined and they are marked up again here.
+function underline(html, parts) {
+  for (const part of parts || []) {
+    const needle = esc(part).replace(/\n/g, '<br>');
+    const at = needle ? html.indexOf(needle) : -1;
+    if (at >= 0) html = `${html.slice(0, at)}<u class="ul">${needle}</u>${html.slice(at + needle.length)}`;
+  }
+  return html;
+}
 const $ = sel => view.querySelector(sel);
 const on = (sel, event, fn) => view.querySelectorAll(sel).forEach(el => el.addEventListener(event, fn));
 const dayKey = t => new Date(t).toLocaleDateString('en-CA');
@@ -74,10 +88,24 @@ function go(path) {
 
 // Each test practices with its own questions. The PSATs share the SAT's skills, so until PSAT exports are added
 // they practice with the SAT's questions.
+// Two exports can contain the same question, and the same question can be reprinted under a different id.
+// Keeping one copy of each is what stops a repeat turning up in a practice run or a timed test.
+const contentKey = q => (q.cbId ? `cb:${q.cbId}` : [q.section, q.passage, q.stem, q.promptImage?.src,
+  (q.choices || []).map(c => c.text ?? c.image?.src).join('|')].join('¦').replace(/\s+/g, ' ').trim().toLowerCase());
+
+function dedupe(questions) {
+  const byKey = new Map();
+  for (const q of questions) {
+    const key = contentKey(q);
+    if (!byKey.has(key)) byKey.set(key, q);
+  }
+  return [...byKey.values()];
+}
+
 function choosePool() {
   const own = allQuestions.filter(q => examOfQuestion(q) === examId);
   const borrow = !own.length && exam.source === 'cb';
-  pool = borrow ? allQuestions.filter(q => examOfQuestion(q) === 'sat') : own;
+  pool = dedupe(borrow ? allQuestions.filter(q => examOfQuestion(q) === 'sat') : own);
   byId = new Map(pool.map(q => [q.id, q]));
   library = { ...library, own: own.length, borrowed: borrow && pool.length > 0 };
 }
@@ -137,9 +165,11 @@ function clock(ms) {
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 }
 
+// A one-line title for a question in a list. The question itself comes first, then its passage, then a written
+// answer choice; questions that are entirely a drawing say so rather than showing a meaningless id.
 function snippet(q) {
-  const text = [q.passage, q.stem].filter(Boolean).join(' ');
-  if (!text) return `Question ${q.cbId ?? q.number ?? q.id}`;
+  const text = [q.stem, q.passage, q.choices?.find(c => c.text)?.text].find(Boolean);
+  if (!text) return q.promptImage ? 'Question shown as a diagram or equation' : `Question ${q.cbId ?? q.number ?? q.id}`;
   return text.length > 90 ? `${text.slice(0, 90)}…` : text;
 }
 
@@ -188,8 +218,9 @@ function toast(message) {
 const ROUTES = {
   home: [viewHome, 'Dashboard'], scores: [viewScores, 'Scores'], start: [viewStart, 'Get started'],
   placement: [viewPlacement, 'Placement test'], placed: [viewPlaced, 'Placement results'], practice: [viewPractice, 'Practice'],
-  test: [viewTest, 'Practice test'], review: [viewReview, 'Review'], plan: [viewPlan, 'Study plan'],
-  library: [viewLibrary, 'Library'], resources: [viewResources, 'Resources'], account: [viewAccount, 'Account'],
+  test: [viewTest, 'Practice test'], review: [viewReview, 'Review'], mistakes: [viewMistakes, 'Mistakes'],
+  plan: [viewPlan, 'Study plan'], library: [viewLibrary, 'Library'], resources: [viewResources, 'Resources'],
+  settings: [viewSettings, 'Settings'], account: [viewAccount, 'Account'],
 };
 
 function render() {
@@ -203,7 +234,7 @@ function render() {
   setMore(false);
   closePalette();
   if (!pool.length && ['practice', 'test', 'placement', 'placed'].includes(route)) return go('library');
-  if (!progress.profile.mode && !['library', 'resources', 'start', 'placement', 'placed', 'account'].includes(route)) return go('start');
+  if (!progress.profile.mode && !['library', 'resources', 'settings', 'start', 'placement', 'placed', 'account'].includes(route)) return go('start');
   if (session && !sessionBelongsTo(route)) session = null;
   document.title = `${ROUTES[route][1]} · ${exam.name} · ${APP_NAME}`;
   renderNav(route);
@@ -212,7 +243,7 @@ function render() {
 }
 
 function sessionBelongsTo(route) {
-  return { placement: 'placement', practice: 'practice', review: 'review' }[route] === session.kind;
+  return { placement: 'placement', practice: 'practice', review: 'review', mistakes: 'mistakes' }[route] === session.kind;
 }
 
 const ICONS = {
@@ -228,6 +259,8 @@ const ICONS = {
   search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/>',
   flame: '<path d="M12 21c-3.9 0-7-2.8-7-6.6 0-2.9 1.9-5 3.6-6.8.6 2 1.8 3 3 3.4-.5-3.1.9-6 3.4-8 .4 3 2 4.6 3.3 6.3 1 1.4 1.7 3 1.7 5.1 0 3.8-3.1 6.6-7 6.6z"/>',
   more: '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>',
+  mistakes: '<path d="M12 4.5 20.5 19.5H3.5z"/><path d="M12 10v4M12 17h.01"/>',
+  settings: '<circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2M12 18.5v2M20.5 12h-2M5.5 12h-2M18 6l-1.4 1.4M7.4 16.6 6 18M18 18l-1.4-1.4M7.4 7.4 6 6"/>',
 };
 const icon = name => `<svg class="icon icon-${name}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
@@ -268,7 +301,9 @@ function renderNav(active) {
   const badge = r => (r === 'review' && due ? `<span class="badge">${due}</span>`
     : r === 'test' && testRunning ? '<span class="badge live">In progress</span>' : '');
 
-  const links = [['home', 'Dashboard'], ['scores', 'Scores'], ['practice', 'Practice'], ['test', 'Practice test'], ['review', 'Review'], ['plan', 'Study plan'], ['library', 'Library'], ['resources', 'Resources']];
+  const links = [['home', 'Dashboard'], ['scores', 'Scores'], ['practice', 'Practice'], ['test', 'Practice test'],
+    ['review', 'Review'], ['mistakes', 'Mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
+    ['resources', 'Resources'], ['settings', 'Settings']];
   // Collapsed, the sidebar is a strip of icons; names move into tooltips and accessible labels.
   const collapsed = shell.classList.contains('collapsed');
   const tip = text => (collapsed ? ` title="${esc(text)}"` : '');
@@ -292,7 +327,8 @@ function renderNav(active) {
     ${sync ? `<a class="top-sync" href="#/account" aria-label="${syncText}"><i class="dot ${syncDot}"></i></a>` : ''}`;
 
   const tabLinks = [['home', 'Home'], ['practice', 'Practice'], ['test', 'Test'], ['review', 'Review']];
-  const moreLinks = [['scores', 'Scores'], ['plan', 'Study plan'], ['library', 'Library'], ['resources', 'Resources'], ...(sync ? [['account', sync.account ? 'Account' : 'Sign in']] : [])];
+  const moreLinks = [['scores', 'Scores'], ['mistakes', 'Mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
+    ['resources', 'Resources'], ['settings', 'Settings'], ...(sync ? [['account', sync.account ? 'Account' : 'Sign in']] : [])];
   const inMore = moreLinks.some(([r]) => r === active);
   tabs.innerHTML = `${tabLinks.map(([r, label]) => `<a href="#/${r}"${current(r)}>${icon(r)}<span>${label}</span>${badge(r)}</a>`).join('')}
     <button type="button" id="more-toggle"${inMore ? ' class="on"' : ''} aria-expanded="${!more.hidden}" aria-controls="more">${icon('more')}<span>More</span></button>`;
@@ -313,8 +349,9 @@ function setMore(open) {
 
 // "Jump to": search pages, the current test's skills, and the other tests.
 function paletteItems() {
-  const pages = [['home', 'Dashboard'], ['scores', 'Scores'], ['practice', 'Practice'], ['test', 'Practice test'], ['review', 'Review'],
-    ['plan', 'Study plan'], ['library', 'Library'], ['resources', 'Resources'], ...(syncConfigured ? [['account', 'Account']] : [])]
+  const pages = [['home', 'Dashboard'], ['scores', 'Scores'], ['practice', 'Practice'], ['test', 'Practice test'],
+    ['review', 'Review'], ['mistakes', 'Mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
+    ['resources', 'Resources'], ['settings', 'Settings'], ...(syncConfigured ? [['account', 'Account']] : [])]
     .map(([route, label]) => ({ label, hint: 'Page', href: `#/${route}` }));
   const skills = exam.sections.flatMap(s => skillsOf(exam, s.id)
     .filter(k => pool.some(q => q.section === s.id && q.skill === k.name))
@@ -410,10 +447,10 @@ function questionHtml(q, st = {}) {
     prompt = `<div class="prompt-image">${imgHtml(q.promptImage, 'The question, as shown in the official export')}</div>`;
   } else {
     const passage = q.passage || st.passageHtml
-      ? `<div class="passage">${st.passageHtml ?? para(q.passage)}</div>` : '';
+      ? `<div class="passage">${st.passageHtml ?? underline(para(q.passage), q.underline)}</div>` : '';
     const figures = (q.figures || []).map(src => `<img class="figure" src="${esc(src)}" alt="Figure for this question">`).join('');
     if (passage || figures) reading = `<div class="q-read">${passage}${figures}</div>`;
-    prompt = `<div class="stem">${para(q.stem)}</div>`;
+    prompt = `<div class="stem">${underline(para(q.stem), q.underline)}</div>`;
   }
   let answer;
   if (q.choices) {
@@ -675,13 +712,30 @@ function viewPlaced() {
 
 // ---------- practice ----------
 
+// Every question available is served once before any of them comes round again, and the question just answered
+// is never the next one, so practice never repeats itself while unseen questions are still waiting.
+function pickPracticeQuestion(section) {
+  session.served ||= new Set();
+  const options = { skill: session.skill || undefined, exam };
+  let q = nextPracticeQuestion(pool, progress, section, { ...options, exclude: session.served });
+  if (!q && session.served.size) {
+    session.served = new Set(session.lastId ? [session.lastId] : []);
+    q = nextPracticeQuestion(pool, progress, section, { ...options, exclude: session.served });
+  }
+  if (q) {
+    session.served.add(q.id);
+    session.lastId = q.id;
+  }
+  return q;
+}
+
 function viewPractice(arg) {
   const section = sectionOf(exam, arg) ? arg : session?.kind === 'practice' ? session.section : exam.sections[0].id;
   if (session?.kind !== 'practice' || session.section !== section) {
     session = { kind: 'practice', section, skill: '', done: 0, correct: 0, q: null };
   }
   if (!session.q) {
-    session.q = nextPracticeQuestion(pool, progress, section, { skill: session.skill || undefined, exam });
+    session.q = pickPracticeQuestion(section);
     session.st = newDrillState();
   }
   const skills = skillsOf(exam, section).filter(s => pool.some(q => q.section === section && q.skill === s.name));
@@ -700,7 +754,10 @@ function viewPractice(arg) {
   } else {
     renderDrill(header, 'practice', () => viewPractice(section));
   }
-  on('#skill', 'change', e => { session.skill = e.target.value; session.q = null; viewPractice(section); });
+  on('#skill', 'change', e => {
+    Object.assign(session, { skill: e.target.value, q: null, served: new Set(), lastId: null });
+    viewPractice(section);
+  });
 }
 
 // ---------- review ----------
@@ -750,6 +807,127 @@ function reviewSession() {
   }
   const header = `<header class="bar"><div><div class="eyebrow">Review · ${exam.name}</div><strong>${plural(session.queue.length + 1, 'question')} left</strong></div><span class="tally">${session.correct}/${session.done} correct</span></header>`;
   renderDrill(header, 'review', reviewSession);
+}
+
+// ---------- mistakes: everything you have ever missed ----------
+
+// Review is the spaced-repetition queue: it decides what to bring back and when. This is the collection behind
+// it — every question ever missed, kept so it can be looked through, read again, and drilled whenever the
+// student feels like it rather than only when something is due.
+
+const MISTAKE_FILTERS = [['all', 'All'], ['due', 'Due now'], ['learning', 'Still learning'], ['graduated', 'Learned']];
+let mistakeView = { filter: 'all', section: 'all' };
+
+const lastMiss = qid => [...progress.responses].reverse().find(r => r.qid === qid && !r.correct) ?? null;
+
+function mistakeEntries() {
+  return Object.entries(progress.mistakes)
+    .filter(([id]) => byId.has(id))
+    .map(([id, m]) => ({ id, m, q: byId.get(id) }))
+    .sort((a, b) => (a.m.graduated ? 1 : 0) - (b.m.graduated ? 1 : 0) || (a.m.due ?? 0) - (b.m.due ?? 0));
+}
+
+const matchesFilter = ({ m }) => (mistakeView.filter === 'all' ? true
+  : mistakeView.filter === 'due' ? !m.graduated && m.due <= Date.now()
+  : mistakeView.filter === 'learning' ? !m.graduated
+  : Boolean(m.graduated));
+
+function viewMistakes(arg) {
+  if (arg === 'go') return mistakeDrill();
+  session = null;
+  const all = mistakeEntries();
+  const sections = exam.sections.filter(s => all.some(e => e.q.section === s.id));
+  if (!sections.some(s => s.id === mistakeView.section)) mistakeView.section = 'all';
+  const shown = all.filter(e => matchesFilter(e) && (mistakeView.section === 'all' || e.q.section === mistakeView.section));
+  const due = all.filter(e => !e.m.graduated && e.m.due <= Date.now()).length;
+  const learning = all.filter(e => !e.m.graduated).length;
+  const graduated = all.length - learning;
+  const lapses = all.reduce((sum, e) => sum + (e.m.lapses || 0), 0);
+
+  view.innerHTML = `
+    ${pageHead('Mistakes', {
+      eyebrow: `${exam.long} · everything you have missed`,
+      actions: `<button class="primary" id="drill" ${shown.length ? '' : 'disabled'}>Practice ${plural(Math.min(shown.length, 20), 'question')}</button>`,
+    })}
+    <div class="kpis">
+      <div class="kpi"><span class="eyebrow">Collected</span><strong>${all.length}</strong><span class="muted">${all.length === 1 ? 'question' : 'questions'} missed at least once</span></div>
+      <div class="kpi"><span class="eyebrow">Still learning</span><strong>${learning}</strong><span class="muted">${due ? `${due} due now` : 'nothing due right now'}</span></div>
+      <div class="kpi"><span class="eyebrow">Learned</span><strong>${graduated}</strong><span class="muted">answered right five times running</span></div>
+      <div class="kpi"><span class="eyebrow">Total misses</span><strong>${lapses}</strong><span class="muted">including repeats of the same question</span></div>
+    </div>
+    ${all.length ? `
+      <div class="filter-bar">
+        <div class="chips" role="group" aria-label="Show">${MISTAKE_FILTERS.map(([id, label]) =>
+          `<button type="button" class="chip${mistakeView.filter === id ? ' active' : ''}" data-mfilter="${id}" aria-pressed="${mistakeView.filter === id}">${label}</button>`).join('')}</div>
+        ${sections.length > 1 ? `<div class="chips" role="group" aria-label="Section">${[['all', 'Both sections'], ...sections.map(s => [s.id, s.short])].map(([id, label]) =>
+          `<button type="button" class="chip${mistakeView.section === id ? ' active' : ''}" data-msection="${id}" aria-pressed="${mistakeView.section === id}">${esc(label)}</button>`).join('')}</div>` : ''}
+      </div>
+      ${shown.length ? `<ol class="mistake-list">${shown.map(({ id, m, q }) => {
+        const missed = lastMiss(id);
+        const state = m.graduated ? '<span class="pill good">Learned</span>'
+          : m.due <= Date.now() ? '<span class="pill due">Due now</span>'
+          : `<span class="pill">Back ${new Date(m.due).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>`;
+        return `<li>
+          <details class="mistake">
+            <summary>
+              <span class="mistake-head">
+                <span class="mistake-title">${esc(snippet(q))}</span>
+                <span class="mistake-meta">${esc(q.skill)}${q.difficulty ? ` · ${esc(q.difficulty)}` : ''}${m.lapses > 1 ? ` · missed ${plural(m.lapses, 'time')}` : ''}${m.reason ? ` · ${esc(m.reason)}` : ''}</span>
+              </span>
+              ${state}
+            </summary>
+            <div class="mistake-body" data-qid="${esc(id)}">
+              ${questionHtml(q, { selected: missed?.choice ?? null, revealed: true, correct: false, hideMeta: true })}
+              ${reasonPicker(id)}
+              <div class="actions"><button class="small" data-practice-skill="${esc(q.skill)}" data-practice-section="${q.section}">Practice this skill</button></div>
+            </div>
+          </details>
+        </li>`;
+      }).join('')}</ol>`
+        : `<div class="empty"><h2>Nothing here</h2><p>No mistakes match that filter.</p></div>`}`
+      : `<div class="empty"><h2>No mistakes yet</h2><p>Questions you get wrong in practice and on timed tests are collected here, so you can look back at them and drill them whenever you like.</p><a class="button primary" href="#/practice">Start practicing</a></div>`}`;
+
+  on('[data-mfilter]', 'click', e => { mistakeView = { ...mistakeView, filter: e.currentTarget.dataset.mfilter }; viewMistakes(); });
+  on('[data-msection]', 'click', e => { mistakeView = { ...mistakeView, section: e.currentTarget.dataset.msection }; viewMistakes(); });
+  on('[data-practice-skill]', 'click', e => practiceSkill(e.currentTarget.dataset.practiceSection, e.currentTarget.dataset.practiceSkill));
+  // Every open mistake has its own reason buttons, so each one is tagged with the question it belongs to.
+  on('.mistake-body [data-reason]', 'click', e => {
+    const body = e.currentTarget.closest('.mistake-body');
+    const entry = progress.mistakes[body.dataset.qid];
+    if (!entry) return;
+    entry.reason = e.currentTarget.dataset.reason;
+    entry.updatedAt = Date.now();
+    save();
+    body.querySelectorAll('[data-reason]').forEach(b => b.classList.toggle('active', b === e.currentTarget));
+  });
+  on('#drill', 'click', () => go('mistakes/go'));
+}
+
+// Drilling from here works like Review, except it takes whatever is on screen instead of only what is due.
+function mistakeDrill() {
+  if (session?.kind !== 'mistakes') {
+    const queue = mistakeEntries()
+      .filter(e => matchesFilter(e) && (mistakeView.section === 'all' || e.q.section === mistakeView.section))
+      .slice(0, 20).map(e => e.id);
+    session = { kind: 'mistakes', queue, done: 0, correct: 0, q: null };
+  }
+  if (!session.q) {
+    const id = session.queue.shift();
+    if (!id) {
+      const { correct, done } = session;
+      session = null;
+      view.innerHTML = `${pageHead('Mistakes', { eyebrow: exam.long })}
+        <div class="empty celebrate"><h2>${done && correct === done ? 'Every one right.' : 'Session complete'}</h2>
+        <p>${correct} of ${done} correct. The ones you got right move further down your review schedule; the ones you missed come back tomorrow.</p>
+        <div class="actions"><a class="button primary" href="#/mistakes">Back to mistakes</a><a class="button" href="#/home">Dashboard</a></div></div>`;
+      renderNav('mistakes');
+      return;
+    }
+    session.q = byId.get(id);
+    session.st = newDrillState();
+  }
+  const header = `<header class="bar"><div><div class="eyebrow">Mistakes · ${exam.name}</div><strong>${plural(session.queue.length + 1, 'question')} left</strong></div><span class="tally">${session.correct}/${session.done} correct</span></header>`;
+  renderDrill(header, 'review', mistakeDrill);
 }
 
 // ---------- timed practice test ----------
@@ -1565,12 +1743,64 @@ function viewLibrary() {
         <tbody>${rows}</tbody>
       </table></div>
     </div>
+    <p class="hint">Appearance, text size and resetting your progress live on the <a href="#/settings">Settings</a> page.</p>`;
+}
+
+// ---------- settings ----------
+
+const SETTING_GROUPS = [
+  ['theme', 'Theme', 'Light, dark, or whatever your device is set to.'],
+  ['accent', 'Accent colour', 'Used for the active page, streaks, highlights and charts.'],
+  ['textsize', 'Text size', 'Scales the questions, passages and everything else.'],
+  ['contrast', 'Contrast', 'Turn this up if text or borders are hard to make out.'],
+  ['motion', 'Animation', 'How much the app moves as pages and answers appear.'],
+];
+
+function viewSettings() {
+  view.innerHTML = `
+    ${pageHead('Settings', { eyebrow: APP_NAME })}
+    <p class="muted">These settings belong to this device, not your account, so a phone and a laptop can each be set up the way that suits them.</p>
+    <div class="settings-grid">
+      ${SETTING_GROUPS.map(([key, title, note]) => `
+        <section class="card setting">
+          <h2 id="set-${key}">${title}</h2>
+          <p class="hint">${note}</p>
+          <div class="swatches" role="radiogroup" aria-labelledby="set-${key}">
+            ${CHOICES[key].map(([value, label, about]) => `
+              <button type="button" class="swatch${settings[key] === value ? ' on' : ''}" role="radio"
+                aria-checked="${settings[key] === value}" data-set="${key}" data-value="${value}" data-preview="${value}">
+                ${key === 'accent' ? '<i class="swatch-dot" aria-hidden="true"></i>' : ''}
+                <span class="swatch-name"${key === 'textsize' ? ` style="font-size:${{ small: 13, medium: 15, large: 17, xlarge: 19 }[value]}px"` : ''}>${esc(label)}</span>
+                ${about ? `<small>${esc(about)}</small>` : ''}
+              </button>`).join('')}
+          </div>
+        </section>`).join('')}
+    </div>
     <div class="card">
-      <h2>Settings</h2>
-      <p class="hint">Resetting erases your ${exam.name} practice history, mistake log, test results and study plan${syncConfigured ? ' on every device signed in to your account' : ''}. Your other tests aren't affected.</p>
+      <h2>Sample</h2>
+      <p class="hint">A question the way it will look with these settings.</p>
+      <div class="passage">Some critics dismissed the novel as simplistic. <u class="ul">Yet its short sentences, which at first seem plain, gradually build a rhythm that mirrors the narrator’s anxiety.</u></div>
+      <div class="sample-row">
+        <span class="mastery-chip high"><i aria-hidden="true"></i>Strong · 82%</span>
+        <span class="mastery-chip mid"><i aria-hidden="true"></i>Building · 58%</span>
+        <span class="mastery-chip low"><i aria-hidden="true"></i>Needs work · 31%</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Reset progress</h2>
+      <p class="hint">This erases your ${exam.name} practice history, mistake log, test results and study plan${syncConfigured ? ' on every device signed in to your account' : ''}. Your other tests aren't affected.</p>
       <div class="actions"><button class="danger" id="reset">Reset ${exam.name} progress</button></div>
     </div>`;
 
+  on('[data-set]', 'click', e => {
+    const { set, value } = e.currentTarget.dataset;
+    if (settings[set] === value) return;
+    settings = { ...settings, [set]: value };
+    saveSettings(settings);
+    applySettings(settings);
+    viewSettings();
+    toast('Saved');
+  });
   confirmButton('#reset', 'Click again to erase progress', () => {
     // The reset time travels with synced progress, so every signed-in device drops what came before it.
     const now = Date.now();

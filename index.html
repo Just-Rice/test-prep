@@ -21,6 +21,7 @@
       "./js/exams.js": "./js/exams.js?v=__VERSION__",
       "./js/firebase-config.js": "./js/firebase-config.js?v=__VERSION__",
       "./js/irt.js": "./js/irt.js?v=__VERSION__",
+      "./js/settings.js": "./js/settings.js?v=__VERSION__",
       "./js/srs.js": "./js/srs.js?v=__VERSION__",
       "./js/store.js": "./js/store.js?v=__VERSION__",
       "./js/sync.js": "./js/sync.js?v=__VERSION__",
@@ -29,6 +30,16 @@
       "./js/taxonomy-act.js": "./js/taxonomy-act.js?v=__VERSION__"
     }
   }
+  </script>
+  <script>
+    // Appearance settings (js/settings.js) are applied before the first paint, so the page never flashes the
+    // wrong theme, accent or text size while the app loads.
+    try {
+      var saved = JSON.parse(localStorage.getItem('satprep.settings.v1') || '{}');
+      ['theme', 'accent', 'textsize', 'contrast', 'motion'].forEach(function (key) {
+        if (saved[key]) document.documentElement.setAttribute('data-' + key, saved[key]);
+      });
+    } catch (e) { /* storage unavailable */ }
   </script>
   <script>
     // If the app can't start, say so instead of showing "Loading…" forever.

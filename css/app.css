@@ -560,3 +560,211 @@ button.link:hover:not(:disabled) { text-decoration: underline; }
 .sk-tile { height: 90px; }
 @keyframes sk { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
+
+/* ==========================================================================
+   Appearance settings (js/settings.js). Theme, accent, text size, contrast and
+   animation are data- attributes on <html>, applied before the first paint by
+   index.html so nothing flashes while the app loads.
+   ========================================================================== */
+
+/* ---------- accent packs ---------- */
+/* Each pack names its own light and dark values; the three theme blocks below pick a side.
+   Nothing else in the palette changes with the accent. */
+:root[data-accent="pencil"] {
+  --a-light: #F2B01E; --a-ink-light: #7A5500; --a-soft-light: #FDF1D3; --a-on-light: #241A00; --a-chart-light: #B37A06;
+  --a-dark: #F5C24A; --a-ink-dark: #F5C24A; --a-soft-dark: #3A3017; --a-on-dark: #241A00; --a-chart-dark: #B98529;
+}
+:root[data-accent="ocean"] {
+  --a-light: #2E7FE8; --a-ink-light: #17529B; --a-soft-light: #E4EDFC; --a-on-light: #FFFFFF; --a-chart-light: #2E6FD0;
+  --a-dark: #74AAF7; --a-ink-dark: #9CC5FA; --a-soft-dark: #17293F; --a-on-dark: #0B1A2E; --a-chart-dark: #6C9FE8;
+}
+:root[data-accent="forest"] {
+  --a-light: #2F8A5B; --a-ink-light: #1D5B3B; --a-soft-light: #E2F2E9; --a-on-light: #FFFFFF; --a-chart-light: #2F8A5B;
+  --a-dark: #5CC28A; --a-ink-dark: #86D6AA; --a-soft-dark: #14301F; --a-on-dark: #06180E; --a-chart-dark: #4FA877;
+}
+:root[data-accent="grape"] {
+  --a-light: #7C5CD6; --a-ink-light: #513A93; --a-soft-light: #ECE7FB; --a-on-light: #FFFFFF; --a-chart-light: #6F4FC8;
+  --a-dark: #A78BF0; --a-ink-dark: #C0ACF6; --a-soft-dark: #241B45; --a-on-dark: #140C2B; --a-chart-dark: #9070DE;
+}
+:root[data-accent="ember"] {
+  --a-light: #D2542F; --a-ink-light: #8D3316; --a-soft-light: #FBE7E0; --a-on-light: #FFFFFF; --a-chart-light: #C24D2B;
+  --a-dark: #F08A6A; --a-ink-dark: #F4A88E; --a-soft-dark: #3A1C12; --a-on-dark: #2A0D05; --a-chart-dark: #D97A55;
+}
+
+/* ---------- which side of each pack is in use ---------- */
+/* Light is the default. The dark block repeats the palette from the top of this file so that an explicit
+   light choice can win it back; the explicit blocks come last so a chosen theme beats the device setting. */
+:root {
+  --accent: var(--a-light, #F2B01E); --accent-ink: var(--a-ink-light, #7A5500);
+  --accent-soft: var(--a-soft-light, #FDF1D3); --on-accent: var(--a-on-light, #241A00);
+  --chart: var(--a-chart-light, #B37A06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent: var(--a-dark, #F5C24A); --accent-ink: var(--a-ink-dark, #F5C24A);
+    --accent-soft: var(--a-soft-dark, #3A3017); --on-accent: var(--a-on-dark, #241A00);
+    --chart: var(--a-chart-dark, #B98529);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121518; --surface: #1B1F25; --surface-2: #252B32; --ink: #E8EBEE; --muted: #9AA3AD; --rule: #2B3139;
+  --side: #0B0D10; --side-ink: #C3CAD2; --side-strong: #FFFFFF; --side-muted: #7D8792; --side-raise: rgb(255 255 255 / 0.06);
+  --good: #5CC28A; --good-soft: #173524; --mid: #E3B04B; --mid-soft: #3A2F14; --low: #EE7C6F; --low-soft: #3D1F1C;
+  --mark: #6B5A12; --focus: var(--accent); --pop: 0 16px 40px -12px rgb(0 0 0 / 0.7);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.45);
+  --shadow-2: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 28px -10px rgb(0 0 0 / 0.75);
+  --card-border: 1px solid #2B3139;
+  --accent: var(--a-dark, #F5C24A); --accent-ink: var(--a-ink-dark, #F5C24A);
+  --accent-soft: var(--a-soft-dark, #3A3017); --on-accent: var(--a-on-dark, #241A00);
+  --chart: var(--a-chart-dark, #B98529);
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #F4F5F7; --surface: #FFFFFF; --surface-2: #ECEFF3; --ink: #1A1F25; --muted: #636D78; --rule: #E0E4E9;
+  --side: #1F242B; --side-ink: #C3CAD2; --side-strong: #FFFFFF; --side-muted: #8B949E; --side-raise: rgb(255 255 255 / 0.07);
+  --good: #2F8A5B; --good-soft: #E2F2E9; --mid: #B37A06; --mid-soft: #FBF0D9; --low: #C4473A; --low-soft: #FBE7E4;
+  --mark: #FFE08A; --focus: #1A1F25; --pop: 0 16px 40px -12px rgb(20 25 35 / 0.35);
+  --shadow-1: 0 1px 2px rgb(16 24 40 / 0.06), 0 1px 3px rgb(16 24 40 / 0.06);
+  --shadow-2: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 24px -8px rgb(16 24 40 / 0.16);
+  --card-border: 1px solid transparent;
+  --accent: var(--a-light, #F2B01E); --accent-ink: var(--a-ink-light, #7A5500);
+  --accent-soft: var(--a-soft-light, #FDF1D3); --on-accent: var(--a-on-light, #241A00);
+  --chart: var(--a-chart-light, #B37A06);
+  color-scheme: light;
+}
+/* Export crops are black on white, so they are inverted on a dark background and left alone on a light one. */
+:root[data-theme="dark"] .figure, :root[data-theme="dark"] .qimg { filter: invert(0.9) hue-rotate(180deg); }
+:root[data-theme="light"] .figure, :root[data-theme="light"] .qimg { filter: none; }
+
+/* Text on the accent: the yellow needs dark ink, the blues and purples need white. */
+.badge, .streak.on .streak-count, .today-mobile .streak.on .streak-count { color: var(--on-accent); }
+
+/* ---------- text size ---------- */
+:root { --text-scale: 1; }
+:root[data-textsize="small"] { --text-scale: 0.94; }
+:root[data-textsize="large"] { --text-scale: 1.12; }
+:root[data-textsize="xlarge"] { --text-scale: 1.26; }
+body { font-size: calc(16px * var(--text-scale)); }
+h1 { font-size: calc(clamp(26px, 3.2vw, 30px) * var(--text-scale)); }
+h2 { font-size: calc(19px * var(--text-scale)); }
+h3 { font-size: calc(16px * var(--text-scale)); }
+.passage, .stem { font-size: calc(16.5px * var(--text-scale)); }
+.choice-btn { font-size: calc(16px * var(--text-scale)); }
+.spr input { font-size: calc(18px * var(--text-scale)); }
+.hint, .note, .feedback, .rationale { font-size: calc(14.5px * var(--text-scale)); }
+button, .button { font-size: calc(15px * var(--text-scale)); }
+
+/* ---------- high contrast ---------- */
+:root[data-contrast="high"] {
+  --muted: #333B45; --rule: #8D97A2; --card-border: 1px solid var(--rule);
+  --shadow-1: none; --shadow-2: 0 2px 0 var(--rule);
+}
+:root[data-theme="dark"][data-contrast="high"],
+:root[data-contrast="high"]:not([data-theme="light"]) { --muted: #C6CDD5; --rule: #6E7883; }
+:root[data-contrast="high"] .card, :root[data-contrast="high"] .question, :root[data-contrast="high"] .kpi,
+:root[data-contrast="high"] .rail-card, :root[data-contrast="high"] .plan-card, :root[data-contrast="high"] .table-card,
+:root[data-contrast="high"] .empty, :root[data-contrast="high"] .score-hero, :root[data-contrast="high"] details.mistake {
+  border: 1.5px solid var(--rule);
+}
+:root[data-contrast="high"] p a, :root[data-contrast="high"] .links a { text-decoration: underline; }
+:root[data-contrast="high"] :focus-visible { outline-width: 3px; }
+:root[data-contrast="high"] u.ul { text-decoration-color: currentColor; text-decoration-thickness: 3px; }
+
+/* ---------- animation ---------- */
+@keyframes rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+@keyframes pop-in { from { transform: scale(0.82); } to { transform: scale(1); } }
+@keyframes slide-down { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes celebrate { 0% { transform: scale(0.94); opacity: 0; } 60% { transform: scale(1.02); } 100% { transform: scale(1); opacity: 1; } }
+
+/* Each page settles in from below, a little after the one above it. */
+#view > * { animation: rise 0.26s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+#view > *:nth-child(2) { animation-delay: 0.03s; }
+#view > *:nth-child(3) { animation-delay: 0.05s; }
+#view > *:nth-child(4) { animation-delay: 0.07s; }
+#view > *:nth-child(n + 5) { animation-delay: 0.09s; }
+/* Nothing moves during a timed test: the clock is running and the question should just be there. */
+#view > .test, #view > .test * { animation: none; }
+
+.side-nav a, .sync, .tabs a, .tabs button { transition: background-color 0.16s ease, color 0.16s ease; }
+.side-nav a.on { animation: slide-down 0.22s ease both; }
+.badge { animation: pop-in 0.22s cubic-bezier(0.2, 1.4, 0.5, 1) both; }
+button, .button, .chip, .swatch, .exam-switch button { transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.12s ease, box-shadow 0.16s ease; }
+button:active:not(:disabled), .button:active { transform: scale(0.97); }
+.choice-btn { transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.12s ease; }
+.choice-btn:active:not(:disabled) { transform: scale(0.99); }
+.card, .kpi, .rail-card, details.mistake { transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease; }
+.kpi:hover, .rail-card:hover, details.mistake:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
+.fill, .goal-bar > i, .scale-band, .scale-dot { transition: width 0.45s cubic-bezier(0.2, 0.7, 0.3, 1), left 0.45s cubic-bezier(0.2, 0.7, 0.3, 1); }
+.feedback { animation: rise 0.26s ease both; }
+.correct .letter, .wrong .letter { animation: pop-in 0.28s cubic-bezier(0.2, 1.4, 0.5, 1) both; }
+.tag { animation: rise 0.24s ease 0.06s both; }
+.mistake[open] .mistake-body { animation: slide-down 0.2s ease both; }
+.empty.celebrate { animation: celebrate 0.4s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+.week .on i { animation: pop-in 0.3s cubic-bezier(0.2, 1.4, 0.5, 1) both; }
+.streak.on .streak-count { animation: pop-in 0.3s cubic-bezier(0.2, 1.4, 0.5, 1) both; }
+
+/* "Reduced" in Settings, and any device that asks for less movement, stop all of it. */
+:root[data-motion="reduced"] *, :root[data-motion="reduced"] *::before, :root[data-motion="reduced"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+
+/* ---------- more colour across the app ---------- */
+.page-head { border-bottom: 0; background-image: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 12%, var(--rule)) 42%, var(--rule)); background-repeat: no-repeat; background-position: bottom left; background-size: 100% 2px; }
+.plan-card { border-left: 3px solid var(--accent); }
+.score-hero { background-image: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--surface)), var(--surface) 58%); }
+.rail-label { color: var(--accent-ink); }
+.kpi { border-top: 3px solid var(--rule); }
+.kpis .kpi:nth-child(1) { border-top-color: var(--accent); }
+.kpis .kpi:nth-child(2) { border-top-color: var(--good); }
+.kpis .kpi:nth-child(3) { border-top-color: var(--mid); }
+.kpis .kpi:nth-child(4) { border-top-color: var(--low); }
+.section-scores .kpi { border-top-color: var(--accent); }
+.week .on i { background: linear-gradient(160deg, var(--accent), color-mix(in srgb, var(--accent) 62%, var(--ink))); }
+.qnum { background: var(--accent); color: var(--on-accent); }
+.seg a.active { color: var(--accent-ink); }
+.eyebrow { color: var(--accent-ink); }
+.page-title .eyebrow { color: var(--muted); }
+
+/* Underlined words and phrases a reading question asks about. */
+u.ul { text-decoration-line: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; text-decoration-color: var(--accent); }
+
+/* ---------- mistakes ---------- */
+.filter-bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; }
+.mistake-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.mistake-list > li { margin: 0; }
+details.mistake { background: var(--surface); border: var(--card-border); border-radius: 12px; box-shadow: var(--shadow-1); }
+details.mistake summary { display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; border-radius: 12px; list-style: none; }
+details.mistake summary::-webkit-details-marker { display: none; }
+details.mistake[open] summary { border-radius: 12px 12px 0 0; }
+.mistake-head { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.mistake-title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mistake-meta { font-size: 13px; color: var(--muted); }
+.mistake-body { display: grid; gap: 12px; padding: 0 16px 16px; border-top: 1px solid var(--rule); }
+.mistake-body .question { background: none; border: 0; box-shadow: none; padding: 14px 0 0; }
+.pill { flex: none; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.pill.due { background: var(--accent-soft); color: var(--accent-ink); }
+.pill.good { background: var(--good-soft); color: var(--good); }
+
+/* ---------- settings ---------- */
+.settings-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); align-items: start; }
+.setting h2 { margin-bottom: 2px; }
+.swatches { display: grid; gap: 8px; margin-top: 12px; }
+.swatch { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 1px 12px; width: 100%; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--rule); background: var(--surface); color: var(--ink); text-align: left; }
+.swatch:hover:not(:disabled) { border-color: var(--muted); }
+.swatch.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+.swatch-dot { grid-row: span 2; width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.15); }
+.swatch-name { grid-column: 2; font-weight: 700; }
+.swatch small { grid-column: 2; font-weight: 400; font-size: 12.5px; color: var(--muted); }
+.swatch.on small { color: inherit; opacity: 0.85; }
+.swatch:not(:has(.swatch-dot)) .swatch-name, .swatch:not(:has(.swatch-dot)) small { grid-column: 1 / -1; }
+.swatch[data-preview="pencil"] .swatch-dot { background: linear-gradient(135deg, #F2B01E, #C88F0C); }
+.swatch[data-preview="ocean"] .swatch-dot { background: linear-gradient(135deg, #2E7FE8, #17529B); }
+.swatch[data-preview="forest"] .swatch-dot { background: linear-gradient(135deg, #2F8A5B, #1D5B3B); }
+.swatch[data-preview="grape"] .swatch-dot { background: linear-gradient(135deg, #7C5CD6, #513A93); }
+.swatch[data-preview="ember"] .swatch-dot { background: linear-gradient(135deg, #D2542F, #8D3316); }
+.sample-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
