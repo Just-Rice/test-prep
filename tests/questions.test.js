@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { DIFFICULTY_B } from '../js/irt.js';
 import { DOMAINS, findSkill } from '../js/taxonomy.js';
 import { ALGEBRA_QUESTIONS } from '../js/questions/algebra.js';
+import { ADVANCED_MATH_QUESTIONS } from '../js/questions/advanced-math.js';
 
 // Original questions written for this app. The point of this file is that nothing here trusts the answer
 // recorded in the question: every mathematical answer is worked out again from the wording of the problem,
 // and the two have to agree. A wrong answer key is worse than a missing question, because a student will
 // believe it.
 
-const ORIGINAL = [...ALGEBRA_QUESTIONS];
+const ORIGINAL = [...ALGEBRA_QUESTIONS, ...ADVANCED_MATH_QUESTIONS];
 
 // The value a student would have to produce: the text of the correct choice, or the accepted response.
 function answerValue(q) {
@@ -36,6 +37,19 @@ const slope = (x1, y1, x2, y2) => (y2 - y1) / (x2 - x1);
 // Largest integer strictly less than / at most a bound.
 const greatestBelow = bound => Math.ceil(bound) - 1;
 const greatestAtMost = bound => Math.floor(bound);
+
+// Sample values used to confirm that two expressions really are the same expression. An identity has to hold
+// everywhere, so agreeing at seven scattered points is strong evidence and catches every sign or middle-term
+// slip these questions could contain.
+const XS = [-3, -1, 0, 1, 2, 4, 7];
+const same = (f, g, xs = XS) => xs.every(x => nearly(f(x), g(x)));
+
+// Both roots of ax² + bx + c = 0, smaller first, by the quadratic formula rather than by factoring.
+const roots = (a, b, c) => {
+  const d = Math.sqrt(b * b - 4 * a * c);
+  return [(-b - d) / (2 * a), (-b + d) / (2 * a)];
+};
+const distinctRoots = (a, b, c) => new Set(roots(a, b, c).map(r => r.toFixed(6))).size;
 
 const CHECKS = {
   'og-alg-01': () => linear(3, 7, 0, 22),
@@ -93,6 +107,62 @@ const CHECKS = {
   'og-alg-48': () => greatestBelow(linear(2, -6, 1, 4)),
   'og-alg-49': () => greatestAtMost((5000 - 3200) / 40),
   'og-alg-50': () => null,
+
+  // ---- Advanced Math: equivalent expressions are identities, so they are checked structurally ----
+  'og-adv-01': () => null,
+  'og-adv-02': () => null,
+  'og-adv-03': () => null,
+  'og-adv-04': () => null,
+  'og-adv-05': () => null,
+  'og-adv-06': () => null,
+  'og-adv-07': () => 2 * 3,
+  'og-adv-08': () => null,
+  'og-adv-09': () => null,
+  'og-adv-10': () => null,
+  'og-adv-11': () => null,
+  'og-adv-12': () => 10 / 2,
+  'og-adv-13': () => null,
+  'og-adv-14': () => null,
+  'og-adv-15': () => null,
+  'og-adv-16': () => -12 / 3,
+  'og-adv-17': () => null,
+
+  // ---- Advanced Math: nonlinear equations and systems ----
+  'og-adv-18': () => Math.sqrt(49),
+  'og-adv-19': () => roots(1, -5, 6).reduce((a, b) => a + b, 0),
+  'og-adv-20': () => roots(1, 3, -10)[0],
+  'og-adv-21': () => distinctRoots(1, -6, 9),
+  'og-adv-22': () => roots(1, -7, 12).reduce((a, b) => a * b, 1),
+  'og-adv-23': () => Math.sqrt(8 / 2),
+  'og-adv-24': () => (4 * 4) / (4 * 1),
+  'og-adv-25': () => roots(1, -6, 8).reduce((a, b) => a + b, 0),
+  'og-adv-26': () => 4 * 4 - 5,
+  'og-adv-27': () => 1 + Math.sqrt(16),
+  'og-adv-28': () => Math.max(...roots(1, 2, -15)),
+  'og-adv-29': () => distinctRoots(1, -4, 3),
+  'og-adv-30': () => Math.sqrt(3 + 1),
+  'og-adv-31': () => Math.sqrt(27 / 3),
+  'og-adv-32': () => null,
+  'og-adv-33': () => Math.sqrt(4 * 1 * 9),
+  'og-adv-34': () => 1 / (1 - 1 / 2),
+
+  // ---- Advanced Math: nonlinear functions ----
+  'og-adv-35': () => 3 ** 2 + 1,
+  'og-adv-36': () => (-2) ** 2 - 4 * (-2),
+  'og-adv-37': () => null,
+  'og-adv-38': () => 6 / (2 * 1),
+  'og-adv-39': () => 2 ** 5,
+  'og-adv-40': () => Math.log2(64),
+  'og-adv-41': () => null,
+  'og-adv-42': () => 0 ** 2 + 2 * 0 - 8,
+  'og-adv-43': () => Math.max(...roots(1, 2, -8)),
+  'og-adv-44': () => 3 * 2 ** 0,
+  'og-adv-45': () => 200 * 2 ** (9 / 3),
+  'og-adv-46': () => null,
+  'og-adv-47': () => { const x = 4 / (2 * 1); return x ** 2 - 4 * x + 7; },
+  'og-adv-48': () => (-2) ** 3,
+  'og-adv-49': () => (-1 + 5) / 2,
+  'og-adv-50': () => 500 * 0.8 ** 0,
 };
 
 // Questions whose answer is not a single number get their own predicate.
@@ -106,6 +176,30 @@ const STRUCTURAL = {
   'og-alg-46': v => v === 'x ≤ −5' && 4 - 3 * -5 >= 19,
   'og-alg-47': v => { const [x, y] = v.replace(/[()−]/g, m => (m === '−' ? '-' : '')).split(',').map(Number); return y > 2 * x + 1; },
   'og-alg-50': v => { const x = num(v); return -1 <= 2 * x + 3 && 2 * x + 3 <= 9; },
+
+  // Each of these pins the wording of the chosen answer and, separately, confirms the algebra it claims by
+  // evaluating both sides at many values. The string alone would prove nothing.
+  'og-adv-01': v => v === 'x² + 8x + 16' && same(x => (x + 4) ** 2, x => x ** 2 + 8 * x + 16),
+  'og-adv-02': v => v === '6x² − 15x' && same(x => 3 * x * (2 * x - 5), x => 6 * x ** 2 - 15 * x),
+  'og-adv-03': v => v === '2x² + 7x − 15' && same(x => (2 * x - 3) * (x + 5), x => 2 * x ** 2 + 7 * x - 15),
+  'og-adv-04': v => v === '(x − 3)(x + 3)' && same(x => x ** 2 - 9, x => (x - 3) * (x + 3)),
+  'og-adv-05': v => v === '(x + 3)(x + 4)' && same(x => x ** 2 + 7 * x + 12, x => (x + 3) * (x + 4)),
+  'og-adv-06': v => v === 'x + 2' && same(x => (x ** 2 - 4) / (x - 2), x => x + 2, XS.filter(x => x !== 2)),
+  'og-adv-08': v => v === '(2x − 3)²' && same(x => 4 * x ** 2 - 12 * x + 9, x => (2 * x - 3) ** 2),
+  'og-adv-09': v => v === '6x³y⁵'
+    && [[2, 3], [1, 4], [3, 2]].every(([x, y]) => nearly((3 * x ** 2 * y ** 3) * (2 * x * y ** 2), 6 * x ** 3 * y ** 5)),
+  'og-adv-10': v => v === 'x⁴' && same(x => x ** 6 / x ** 2, x => x ** 4, XS.filter(x => x !== 0)),
+  'og-adv-11': v => v === '7x²' && [1, 2, 3, 5].every(x => nearly(Math.sqrt(49 * x ** 4), 7 * x ** 2)),
+  'og-adv-13': v => v === 'x³ + 8' && same(x => (x + 2) * (x ** 2 - 2 * x + 4), x => x ** 3 + 8),
+  'og-adv-14': v => v === '5x(x + 2)' && same(x => 5 * x ** 2 + 10 * x, x => 5 * x * (x + 2)),
+  'og-adv-15': v => v === 'x² − 25' && same(x => (x - 5) * (x + 5), x => x ** 2 - 25),
+  'og-adv-17': v => v === '4ab'
+    && [[2, 3], [1, 5], [4, -2]].every(([a, b]) => nearly((a + b) ** 2 - (a - b) ** 2, 4 * a * b)),
+  'og-adv-32': v => v === 'x = 4 and x = −4' && nearly(4 ** 2 - 16, 0) && nearly((-4) ** 2 - 16, 0),
+  // The vertex really is the lowest point, so no nearby value of the function may dip below it.
+  'og-adv-37': v => v === '(3, 2)' && nearly((3 - 3) ** 2 + 2, 2) && XS.every(x => (x - 3) ** 2 + 2 >= 2),
+  'og-adv-41': v => v === '(3, 0) and (−3, 0)' && nearly(3 ** 2 - 9, 0) && nearly((-3) ** 2 - 9, 0),
+  'og-adv-46': v => v === 'Downward' && -1 < 0,
 };
 
 test('every original question maps onto the taxonomy', () => {
@@ -175,6 +269,8 @@ test('distractors are never also correct', () => {
     'og-alg-50': v => { const x = num(v); return -1 <= 2 * x + 3 && 2 * x + 3 <= 9; },
     'og-alg-25': v => { const [x, y] = v.replace(/[()]/g, '').split(',').map(Number); return nearly(y, 2 * x - 3); },
     'og-alg-47': v => { const [x, y] = v.replace(/[()−]/g, m => (m === '−' ? '-' : '')).split(',').map(Number); return y > 2 * x + 1; },
+    'og-adv-20': v => nearly(num(v) ** 2 + 3 * num(v) - 10, 0),
+    'og-adv-30': v => nearly(num(v) ** 2 - 1, 3),
   };
   for (const [id, holds] of Object.entries(conditions)) {
     const q = ORIGINAL.find(x => x.id === id);
