@@ -9,6 +9,7 @@ import { GEOMETRY_QUESTIONS } from '../js/questions/geometry.js';
 import { INFORMATION_AND_IDEAS_QUESTIONS } from '../js/questions/information-and-ideas.js';
 import { CRAFT_AND_STRUCTURE_QUESTIONS } from '../js/questions/craft-and-structure.js';
 import { EXPRESSION_OF_IDEAS_QUESTIONS } from '../js/questions/expression-of-ideas.js';
+import { STANDARD_ENGLISH_QUESTIONS } from '../js/questions/standard-english.js';
 
 // Original questions written for this app. The point of this file is that nothing here trusts the answer
 // recorded in the question: every mathematical answer is worked out again from the wording of the problem,
@@ -18,6 +19,7 @@ import { EXPRESSION_OF_IDEAS_QUESTIONS } from '../js/questions/expression-of-ide
 const ORIGINAL = [
   ...ALGEBRA_QUESTIONS, ...ADVANCED_MATH_QUESTIONS, ...PROBLEM_SOLVING_QUESTIONS, ...GEOMETRY_QUESTIONS,
   ...INFORMATION_AND_IDEAS_QUESTIONS, ...CRAFT_AND_STRUCTURE_QUESTIONS, ...EXPRESSION_OF_IDEAS_QUESTIONS,
+  ...STANDARD_ENGLISH_QUESTIONS,
 ];
 
 // The value a student would have to produce: the text of the correct choice, or the accepted response.
