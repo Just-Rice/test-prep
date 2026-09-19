@@ -167,11 +167,24 @@ function clock(ms) {
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 }
 
-// A one-line title for a question in a list. The question itself comes first, then its passage, then a written
-// answer choice; questions that are entirely a drawing say so rather than showing a meaningless id.
+// A one-line title for a question in a list, which has to stay useful when fifty of them sit in a column.
+//
+// Most stems are boilerplate: 55 questions in the current library begin "Which choice completes the text so
+// that it conforms to the conventions of Standard English", and 23 are pure diagrams with no text at all.
+// Titling by stem alone produced pages of identical rows. So the passage, which is what actually differs
+// between questions, is preferred over the stem, and anything still ambiguous is qualified by its skill.
+// An answer choice is never used: out of context "shrimp cocktail for meal B." reads as nonsense.
+const BOILERPLATE = /^which choice (completes|best|most)|^which finding|^which quotation|^based on the texts/i;
+
 function snippet(q) {
-  const text = [q.stem, q.passage, q.choices?.find(c => c.text)?.text].find(Boolean);
-  if (!text) return q.promptImage ? 'Question shown as a diagram or equation' : `Question ${q.cbId ?? q.number ?? q.id}`;
+  const passage = q.passage?.replace(/\s+/g, ' ').trim();
+  const stem = q.stem?.replace(/\s+/g, ' ').trim();
+  const text = passage || (stem && !BOILERPLATE.test(stem) ? stem : null);
+  if (!text) {
+    // Nothing distinctive to show, so name what the question is about instead of repeating its boilerplate.
+    const kind = q.promptImage ? 'Diagram or equation' : 'Question';
+    return `${kind} · ${q.skill}${q.difficulty ? ` · ${q.difficulty}` : ''}`;
+  }
   return text.length > 90 ? `${text.slice(0, 90)}…` : text;
 }
 

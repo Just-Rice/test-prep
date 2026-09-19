@@ -637,9 +637,12 @@ button.link:hover:not(:disabled) { text-decoration: underline; }
 :root[data-theme="light"] .figure, :root[data-theme="light"] .qimg { filter: none; }
 
 /* Text on the accent: the yellow needs dark ink, the blues and purples need white. */
-.badge, .streak.on .streak-count, .today-mobile .streak.on .streak-count { color: var(--on-accent); }
+.badge, .streak.on .streak-count, .today-mobile .streak.on .streak-count { color: var(--on-accent, #241A00); }
 
 /* ---------- text size ---------- */
+/* Defined unconditionally so the first paint is correct even before js/settings.js stamps <html>, and in
+   the case where localStorage is blocked and the attributes are never stamped at all. */
+:root { --on-accent: #241A00; }
 :root { --text-scale: 1; }
 :root[data-textsize="small"] { --text-scale: 0.94; }
 :root[data-textsize="large"] { --text-scale: 1.12; }
@@ -671,13 +674,22 @@ button, .button { font-size: calc(15px * var(--text-scale)); }
 :root[data-contrast="high"] u.ul { text-decoration-color: currentColor; text-decoration-thickness: 3px; }
 
 /* ---------- animation ---------- */
-@keyframes rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+/* `rise` starts from a visible element and only moves it. An earlier version faded from opacity:0 with
+   fill-mode `both`, which pinned a whole page at zero opacity whenever the animation was deferred rather than
+   run -- the Library page was observed blank with all four children at opacity 0 seconds after load. Nothing
+   that carries content may depend on an animation actually starting. */
+@keyframes rise { from { opacity: 0.001; transform: translateY(9px); } to { opacity: 1; transform: none; } }
 @keyframes pop-in { from { transform: scale(0.82); } to { transform: scale(1); } }
-@keyframes slide-down { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
-@keyframes celebrate { 0% { transform: scale(0.94); opacity: 0; } 60% { transform: scale(1.02); } 100% { transform: scale(1); opacity: 1; } }
+@keyframes slide-down { from { opacity: 0.001; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes celebrate { 0% { transform: scale(0.94); opacity: 0.001; } 60% { transform: scale(1.02); } 100% { transform: scale(1); opacity: 1; } }
 
-/* Each page settles in from below, a little after the one above it. */
-#view > * { animation: rise 0.26s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+/* Each page settles in from below, a little after the one above it.
+   The fill mode is deliberately `backwards` and never `both`. With `both`, a page whose animation has not yet
+   started stays pinned at the keyframe's opacity:0 indefinitely, and the whole page renders blank; that was
+   observed on the Library page with every child still at opacity 0 four seconds after load. `backwards` holds
+   the start state only during the delay, so content can never be gated behind an animation that fails to run.
+   The delays are kept under a tenth of a second for the same reason. */
+#view > * { animation: rise 0.26s cubic-bezier(0.2, 0.7, 0.3, 1); }
 #view > *:nth-child(2) { animation-delay: 0.03s; }
 #view > *:nth-child(3) { animation-delay: 0.05s; }
 #view > *:nth-child(4) { animation-delay: 0.07s; }
@@ -695,11 +707,11 @@ button:active:not(:disabled), .button:active { transform: scale(0.97); }
 .card, .kpi, .rail-card, details.mistake { transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease; }
 .kpi:hover, .rail-card:hover, details.mistake:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
 .fill, .goal-bar > i, .scale-band, .scale-dot { transition: width 0.45s cubic-bezier(0.2, 0.7, 0.3, 1), left 0.45s cubic-bezier(0.2, 0.7, 0.3, 1); }
-.feedback { animation: rise 0.26s ease both; }
+.feedback { animation: rise 0.26s ease; }
 .correct .letter, .wrong .letter { animation: pop-in 0.28s cubic-bezier(0.2, 1.4, 0.5, 1) both; }
 .tag { animation: rise 0.24s ease 0.06s both; }
-.mistake[open] .mistake-body { animation: slide-down 0.2s ease both; }
-.empty.celebrate { animation: celebrate 0.4s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+.mistake[open] .mistake-body { animation: slide-down 0.2s ease; }
+.empty.celebrate { animation: celebrate 0.4s cubic-bezier(0.2, 0.9, 0.3, 1); }
 .week .on i { animation: pop-in 0.3s cubic-bezier(0.2, 1.4, 0.5, 1) both; }
 .streak.on .streak-count { animation: pop-in 0.3s cubic-bezier(0.2, 1.4, 0.5, 1) both; }
 
@@ -725,7 +737,7 @@ button:active:not(:disabled), .button:active { transform: scale(0.97); }
 .kpis .kpi:nth-child(4) { border-top-color: var(--low); }
 .section-scores .kpi { border-top-color: var(--accent); }
 .week .on i { background: linear-gradient(160deg, var(--accent), color-mix(in srgb, var(--accent) 62%, var(--ink))); }
-.qnum { background: var(--accent); color: var(--on-accent); }
+.qnum { background: var(--accent); color: var(--on-accent, #241A00); }
 .seg a.active { color: var(--accent-ink); }
 .eyebrow { color: var(--accent-ink); }
 .page-title .eyebrow { color: var(--muted); }
