@@ -1,11 +1,57 @@
 rules_version = '2';
 
-// Each signed-in student can read and write only their own progress: users/{uid} and the answer chunks
-// under users/{uid}/responses. Everything else is closed.
+// Two different things live in this database.
+//
+// Progress belongs to one student: each signed-in account reads and writes only its own, under users/{uid}.
+// That is unchanged, and nothing below widens it.
+//
+// The shared question library is a single copy of the built questions that invited testers can read. It exists
+// so a tester can open the site, sign in, and have questions without downloading or importing anything.
+//
+// Who may see it is decided by two collections that the app itself can never write to:
+//   admins/{uid}    may upload or replace the library
+//   testers/{uid}   may read the library
+//
+// Because `allow write: if false` applies to both lists, membership can only ever be granted by hand in the
+// Firebase console. A stolen or malicious account cannot add itself, and simply signing up gives no access.
+//
+// To set this up the first time: Firebase console -> Authentication, copy your own User UID, then in
+// Firestore create a document at admins/<your-uid> (any contents, an empty document is fine). Add each
+// beta tester the same way at testers/<their-uid> once they have signed in at least once.
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function mayReadLibrary() {
+      return isAdmin() || (signedIn() && exists(/databases/$(database)/documents/testers/$(request.auth.uid)));
+    }
+
+    // A student's own progress, as before.
     match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // The shared question library: invited people read it, only an admin replaces it.
+    match /library/{document=**} {
+      allow read: if mayReadLibrary();
+      allow write: if isAdmin();
+    }
+
+    // The membership lists. Each person may check their own entry, so the app can tell a tester whether they
+    // have been invited yet, but no client can ever write one.
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+    match /testers/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
     }
   }
 }
