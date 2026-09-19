@@ -8,6 +8,7 @@ import { PROBLEM_SOLVING_QUESTIONS } from '../js/questions/problem-solving.js';
 import { GEOMETRY_QUESTIONS } from '../js/questions/geometry.js';
 import { INFORMATION_AND_IDEAS_QUESTIONS } from '../js/questions/information-and-ideas.js';
 import { CRAFT_AND_STRUCTURE_QUESTIONS } from '../js/questions/craft-and-structure.js';
+import { EXPRESSION_OF_IDEAS_QUESTIONS } from '../js/questions/expression-of-ideas.js';
 
 // Original questions written for this app. The point of this file is that nothing here trusts the answer
 // recorded in the question: every mathematical answer is worked out again from the wording of the problem,
@@ -16,7 +17,7 @@ import { CRAFT_AND_STRUCTURE_QUESTIONS } from '../js/questions/craft-and-structu
 
 const ORIGINAL = [
   ...ALGEBRA_QUESTIONS, ...ADVANCED_MATH_QUESTIONS, ...PROBLEM_SOLVING_QUESTIONS, ...GEOMETRY_QUESTIONS,
-  ...INFORMATION_AND_IDEAS_QUESTIONS, ...CRAFT_AND_STRUCTURE_QUESTIONS,
+  ...INFORMATION_AND_IDEAS_QUESTIONS, ...CRAFT_AND_STRUCTURE_QUESTIONS, ...EXPRESSION_OF_IDEAS_QUESTIONS,
 ];
 
 // The value a student would have to produce: the text of the correct choice, or the accepted response.
@@ -475,9 +476,12 @@ test('every reading question carries a passage of workable length', () => {
   for (const q of READING) {
     assert.ok(q.passage, `${q.id}: has no passage`);
     const words = q.passage.trim().split(/\s+/).length;
-    // Command of Evidence items present a claim to be tested rather than a passage to be read, and a claim is
-    // properly one or two sentences. Padding one out to narrative length would make the question worse.
-    const floor = q.skill === 'Command of Evidence' ? 12 : 25;
+    // Not every reading question is built on a passage to be read, and padding the short ones out to
+    // narrative length would make them worse rather than better. A Command of Evidence item presents a claim
+    // to be tested, properly one or two sentences. A Transitions item is two short sentences with the join
+    // between them removed; stretching it only buries the join the student is being asked about.
+    const FLOORS = { 'Command of Evidence': 12, Transitions: 18 };
+    const floor = FLOORS[q.skill] ?? 25;
     assert.ok(words >= floor && words <= 160, `${q.id}: passage is ${words} words, outside the usable range`);
     assert.ok(q.choices, `${q.id}: reading questions are always multiple choice`);
   }
