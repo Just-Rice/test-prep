@@ -4,13 +4,14 @@ import { DIFFICULTY_B } from '../js/irt.js';
 import { DOMAINS, findSkill } from '../js/taxonomy.js';
 import { ALGEBRA_QUESTIONS } from '../js/questions/algebra.js';
 import { ADVANCED_MATH_QUESTIONS } from '../js/questions/advanced-math.js';
+import { PROBLEM_SOLVING_QUESTIONS } from '../js/questions/problem-solving.js';
 
 // Original questions written for this app. The point of this file is that nothing here trusts the answer
 // recorded in the question: every mathematical answer is worked out again from the wording of the problem,
 // and the two have to agree. A wrong answer key is worse than a missing question, because a student will
 // believe it.
 
-const ORIGINAL = [...ALGEBRA_QUESTIONS, ...ADVANCED_MATH_QUESTIONS];
+const ORIGINAL = [...ALGEBRA_QUESTIONS, ...ADVANCED_MATH_QUESTIONS, ...PROBLEM_SOLVING_QUESTIONS];
 
 // The value a student would have to produce: the text of the correct choice, or the accepted response.
 function answerValue(q) {
@@ -21,7 +22,13 @@ function answerValue(q) {
 }
 
 // Questions are written with typographic minus signs; comparisons use real numbers.
-const num = text => Number(String(text).replace(/[−–—]/g, '-').replace(/[^0-9.\-/]/g, ''));
+// Probability answers are written as fractions, which Number() alone cannot read, so "3/8" is divided out.
+// Commas in figures like "4,200" and trailing percent signs are stripped first.
+const num = text => {
+  const s = String(text).replace(/[−–—]/g, '-').replace(/[^0-9.\-/]/g, '');
+  const fraction = s.match(/^(-?\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/);
+  return fraction ? Number(fraction[1]) / Number(fraction[2]) : Number(s);
+};
 
 const nearly = (a, b) => Math.abs(a - b) < 1e-9;
 
@@ -50,6 +57,14 @@ const roots = (a, b, c) => {
   return [(-b - d) / (2 * a), (-b + d) / (2 * a)];
 };
 const distinctRoots = (a, b, c) => new Set(roots(a, b, c).map(r => r.toFixed(6))).size;
+
+const mean = xs => xs.reduce((a, b) => a + b, 0) / xs.length;
+const median = xs => {
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+};
+const stdDev = xs => Math.sqrt(mean(xs.map(x => (x - mean(xs)) ** 2)));
 
 const CHECKS = {
   'og-alg-01': () => linear(3, 7, 0, 22),
@@ -163,6 +178,68 @@ const CHECKS = {
   'og-adv-48': () => (-2) ** 3,
   'og-adv-49': () => (-1 + 5) / 2,
   'og-adv-50': () => 500 * 0.8 ** 0,
+
+  // ---- Problem-Solving and Data Analysis: rates and percentages ----
+  'og-psda-01': () => (150 / 3) * 5,
+  'og-psda-02': () => (12 / 3) * 5,
+  'og-psda-03': () => 45 * (2 / 18),
+  'og-psda-04': () => (60 * 5280) / 3600,
+  'og-psda-05': () => 3.5 * 25,
+  'og-psda-06': () => (480 / 8) * 45,
+  'og-psda-07': () => (5 * 12) / 4,
+  'og-psda-08': () => 45 * (2 / 5),
+  'og-psda-09': () => 0.2 * 150,
+  'og-psda-10': () => (15 / 50) * 100,
+  'og-psda-11': () => 80 * 1.25,
+  'og-psda-12': () => 120 * 0.8,
+  'og-psda-13': () => 36 / 0.75,
+  'og-psda-14': () => null,
+  'og-psda-15': () => (45 / 180) * 100,
+  'og-psda-16': () => 56000 / 1.12,
+
+  // ---- One-variable data ----
+  'og-psda-17': () => mean([4, 8, 10, 14]),
+  'og-psda-18': () => median([3, 7, 9, 12, 20]),
+  'og-psda-19': () => median([2, 5, 7, 10]),
+  'og-psda-20': () => null,
+  'og-psda-21': () => Math.max(12, 4, 19, 7) - Math.min(12, 4, 19, 7),
+  'og-psda-22': () => null,
+  'og-psda-23': () => null,
+
+  // ---- Two-variable data ----
+  'og-psda-24': () => 3 * 4 + 5,
+  'og-psda-25': () => null,
+  'og-psda-26': () => 1.5 * 10 + 2,
+  'og-psda-27': () => null,
+  'og-psda-28': () => 32 - (4 * 5 + 9),
+  'og-psda-29': () => 0.5 * 0 + 12,
+  'og-psda-30': () => (23 - 11) / (6 - 2),
+
+  // ---- Probability ----
+  'og-psda-31': () => 3 / (3 + 5),
+  'og-psda-32': () => 3 / 6,
+  'og-psda-33': () => (20 - 12) / 20,
+  'og-psda-34': () => 18 / 30,
+  'og-psda-35': () => 0.5 * 0.5,
+  'og-psda-36': () => (25 - 10) / 25,
+  'og-psda-37': () => 10 / 16,
+
+  // ---- Inference and margin of error ----
+  'og-psda-38': () => null,
+  'og-psda-39': () => null,
+  'og-psda-40': () => 0.35 * 12000,
+  'og-psda-41': () => null,
+  'og-psda-42': () => 48 + 4,
+  'og-psda-43': () => null,
+  'og-psda-44': () => null,
+
+  // ---- Evaluating statistical claims: these are judgements about study design, checked structurally ----
+  'og-psda-45': () => null,
+  'og-psda-46': () => null,
+  'og-psda-47': () => null,
+  'og-psda-48': () => null,
+  'og-psda-49': () => null,
+  'og-psda-50': () => null,
 };
 
 // Questions whose answer is not a single number get their own predicate.
@@ -200,6 +277,33 @@ const STRUCTURAL = {
   'og-adv-37': v => v === '(3, 2)' && nearly((3 - 3) ** 2 + 2, 2) && XS.every(x => (x - 3) ** 2 + 2 >= 2),
   'og-adv-41': v => v === '(3, 0) and (−3, 0)' && nearly(3 ** 2 - 9, 0) && nearly((-3) ** 2 - 9, 0),
   'og-adv-46': v => v === 'Downward' && -1 < 0,
+
+  // Where the answer is a sentence, the arithmetic behind it is still checked separately, so the wording can
+  // never quietly disagree with the numbers it describes.
+  'og-psda-14': v => v === 'Decrease of 1%' && nearly(200 * 1.1 * 0.9, 198) && 198 < 200,
+  'og-psda-20': v => v === 'Mean'
+    && mean([5, 5, 6, 9, 15]) > median([5, 5, 6, 9, 15]) && mean([5, 5, 6, 9, 15]) > 5,
+  'og-psda-22': v => v === 'The mean'
+    // Adding one extreme value moves the mean much further than the median.
+    && Math.abs(mean([1, 2, 3, 4, 100]) - mean([1, 2, 3, 4]))
+       > Math.abs(median([1, 2, 3, 4, 100]) - median([1, 2, 3, 4])),
+  'og-psda-23': v => v === 'Set B' && stdDev([4, 8, 12, 16]) > stdDev([10, 10, 10, 10])
+    && nearly(mean([4, 8, 12, 16]), mean([10, 10, 10, 10])),
+  'og-psda-25': v => v === 'y decreases by 2 for each increase of 1 in x'
+    && nearly((-2 * 4 + 30) - (-2 * 3 + 30), -2),
+  'og-psda-27': v => v === 'Positively',
+  'og-psda-38': v => v === '59% to 65%' && 62 - 3 === 59 && 62 + 3 === 65,
+  'og-psda-39': v => v === 'It decreases',
+  'og-psda-41': v => v === 'A random sample of all students at the school',
+  'og-psda-43': v => v === 'It is plausible that the population value lies between 40% and 46%',
+  // Margin of error scales with 1/sqrt(n), so doubling the sample leaves more than half of it.
+  'og-psda-44': v => v === 'It decreases, but by less than half' && 1 / Math.sqrt(2) > 0.5 && 1 / Math.sqrt(2) < 1,
+  'og-psda-45': v => v === 'No, because it was observational with no random assignment',
+  'og-psda-46': v => v === 'A randomized controlled experiment',
+  'og-psda-47': v => v === 'The drug causes improvement among subjects like those studied',
+  'og-psda-48': v => v === 'The sample is not representative of the population',
+  'og-psda-49': v => v === 'Random selection of subjects',
+  'og-psda-50': v => v === 'Participants chose their own group, so the groups may differ in other ways',
 };
 
 test('every original question maps onto the taxonomy', () => {
