@@ -6,6 +6,7 @@ import { ALGEBRA_QUESTIONS } from '../js/questions/algebra.js';
 import { ADVANCED_MATH_QUESTIONS } from '../js/questions/advanced-math.js';
 import { PROBLEM_SOLVING_QUESTIONS } from '../js/questions/problem-solving.js';
 import { GEOMETRY_QUESTIONS } from '../js/questions/geometry.js';
+import { INFORMATION_AND_IDEAS_QUESTIONS } from '../js/questions/information-and-ideas.js';
 
 // Original questions written for this app. The point of this file is that nothing here trusts the answer
 // recorded in the question: every mathematical answer is worked out again from the wording of the problem,
@@ -14,6 +15,7 @@ import { GEOMETRY_QUESTIONS } from '../js/questions/geometry.js';
 
 const ORIGINAL = [
   ...ALGEBRA_QUESTIONS, ...ADVANCED_MATH_QUESTIONS, ...PROBLEM_SOLVING_QUESTIONS, ...GEOMETRY_QUESTIONS,
+  ...INFORMATION_AND_IDEAS_QUESTIONS,
 ];
 
 // The value a student would have to produce: the text of the correct choice, or the accepted response.
@@ -456,5 +458,62 @@ test('distractors are never also correct', () => {
     const satisfying = q.choices.filter(c => holds(c.text));
     assert.equal(satisfying.length, 1, `${id}: ${satisfying.length} choices satisfy the condition, expected exactly 1`);
     assert.equal(satisfying[0].letter, q.answer, `${id}: the satisfying choice is not the recorded answer`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Reading and Writing. There is no arithmetic to re-solve here, so instead these
+// enforce the properties a fair reading question has to have. The answer-checking
+// test above skips this section, so without these the reading questions would
+// ship on nothing but my own say-so.
+// ---------------------------------------------------------------------------
+
+const READING = ORIGINAL.filter(q => q.section === 'RW');
+
+test('every reading question carries a passage of workable length', () => {
+  for (const q of READING) {
+    assert.ok(q.passage, `${q.id}: has no passage`);
+    const words = q.passage.trim().split(/\s+/).length;
+    // Command of Evidence items present a claim to be tested rather than a passage to be read, and a claim is
+    // properly one or two sentences. Padding one out to narrative length would make the question worse.
+    const floor = q.skill === 'Command of Evidence' ? 12 : 25;
+    assert.ok(words >= floor && words <= 160, `${q.id}: passage is ${words} words, outside the usable range`);
+    assert.ok(q.choices, `${q.id}: reading questions are always multiple choice`);
+  }
+});
+
+// A student who notices that the fullest-sounding option is usually right can score without reading a word.
+// An earlier version of this test only looked at the longest choice, so when the questions were rewritten to
+// fix that, they landed on the mirror-image flaw instead: the answer became the shortest choice ninety per
+// cent of the time, and the test still passed. The property actually wanted is that length carries no
+// information at all, so every position in the length order is checked. Chance puts each at 25%.
+test('the length of a reading answer does not predict whether it is correct', () => {
+  if (!READING.length) return;
+  const ranks = { 1: 0, 2: 0, 3: 0, 4: 0 };   // 1 is the shortest choice, 4 the longest
+  for (const q of READING) {
+    const byLength = [...q.choices].sort((a, b) => a.text.length - b.text.length);
+    ranks[byLength.findIndex(c => c.letter === q.answer) + 1]++;
+  }
+  for (const [rank, n] of Object.entries(ranks)) {
+    const share = n / READING.length;
+    assert.ok(share <= 0.4,
+      `the correct choice is length-rank ${rank} of 4 in ${Math.round(share * 100)}% of reading questions (${n} of ${READING.length})`);
+  }
+});
+
+// A question that says "according to the text" must be answerable from the text. Comparing word stems is
+// crude, but an answer that restates the passage will always share several of its distinctive words, and one
+// invented out of thin air will not.
+test('answers to "according to the text" questions echo their own passage', () => {
+  const stems = text => new Set(String(text).toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/)
+    .filter(word => word.length >= 5).map(word => word.slice(0, 4)));
+  const asked = READING.filter(q => /according to the text/i.test(q.stem));
+  assert.ok(asked.length, 'some reading questions ask what the text says');
+  for (const q of asked) {
+    const passage = stems(q.passage);
+    const answer = stems(q.choices.find(c => c.letter === q.answer).text);
+    const shared = [...answer].filter(word => passage.has(word));
+    assert.ok(shared.length >= 2,
+      `${q.id}: its answer shares only ${shared.length} distinctive words with the passage it claims to report`);
   }
 });
