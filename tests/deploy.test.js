@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { posix } from 'node:path';
 
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -9,13 +10,19 @@ const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'
 test('the import map versions every module the app loads', () => {
   const html = read('index.html');
   const { imports } = JSON.parse(html.match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
+  // Modules live in subfolders as well as directly under js/, so an import is resolved against the folder of
+  // the file that makes it. An earlier version of this matched only [\w-]+.js, which silently skipped every
+  // module inside js/questions/ and so checked nothing about them at all.
   const seen = new Set();
   const queue = ['app.js'];
   while (queue.length) {
-    for (const [, dep] of read(`js/${queue.shift()}`).matchAll(/from '\.\/([\w-]+\.js)'/g)) {
-      if (!seen.has(dep)) {
-        seen.add(dep);
-        queue.push(dep);
+    const from = queue.shift();
+    const dir = posix.dirname(from);
+    for (const [, dep] of read(`js/${from}`).matchAll(/from '(\.\.?\/[\w./-]+\.js)'/g)) {
+      const resolved = posix.normalize(posix.join(dir, dep));
+      if (!seen.has(resolved)) {
+        seen.add(resolved);
+        queue.push(resolved);
       }
     }
   }

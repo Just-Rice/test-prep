@@ -8,6 +8,7 @@ import { addMistake, dueMistakes, reviewMistake } from './srs.js';
 import { applySettings, CHOICES, loadSettings, saveSettings } from './settings.js';
 import { explainConfigured, explainQuestion, hintFor } from './explain.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
+import { ORIGINAL_QUESTIONS } from './questions/index.js';
 import { mountCalculator } from './calc.js';
 import {
   initSync, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState,
@@ -2044,12 +2045,22 @@ async function loadLibrary() {
     const res = await fetch('data/questions.json', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      if (data.questions.length) return { source: 'exports', questions: data.questions, files: data.files, warnings: data.warnings };
+      // Exported questions are added to the originals rather than replacing them. A library of a few dozen is
+      // what made practice repeat itself in the first place, and there is no reason to hide 400 usable
+      // questions from someone who has also imported their own.
+      if (data.questions.length) {
+        return {
+          source: 'exports', files: data.files, warnings: data.warnings,
+          questions: [...data.questions, ...ORIGINAL_QUESTIONS], own: data.questions.length,
+        };
+      }
     }
   } catch {
     // No built library yet.
   }
-  return { source: 'demo', questions: DEMO_QUESTIONS, files: 0, warnings: [] };
+  // Nothing built, so the questions written for this app are the library. They ship in the repo, so this is
+  // what every visitor who has not imported their own exports actually practises with.
+  return { source: 'original', questions: [...ORIGINAL_QUESTIONS, ...DEMO_QUESTIONS], files: 0, warnings: [] };
 }
 
 // Earlier versions imported questions into IndexedDB in the browser; that copy is no longer used.
