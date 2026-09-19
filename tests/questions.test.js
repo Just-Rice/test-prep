@@ -7,6 +7,7 @@ import { ADVANCED_MATH_QUESTIONS } from '../js/questions/advanced-math.js';
 import { PROBLEM_SOLVING_QUESTIONS } from '../js/questions/problem-solving.js';
 import { GEOMETRY_QUESTIONS } from '../js/questions/geometry.js';
 import { INFORMATION_AND_IDEAS_QUESTIONS } from '../js/questions/information-and-ideas.js';
+import { CRAFT_AND_STRUCTURE_QUESTIONS } from '../js/questions/craft-and-structure.js';
 
 // Original questions written for this app. The point of this file is that nothing here trusts the answer
 // recorded in the question: every mathematical answer is worked out again from the wording of the problem,
@@ -15,7 +16,7 @@ import { INFORMATION_AND_IDEAS_QUESTIONS } from '../js/questions/information-and
 
 const ORIGINAL = [
   ...ALGEBRA_QUESTIONS, ...ADVANCED_MATH_QUESTIONS, ...PROBLEM_SOLVING_QUESTIONS, ...GEOMETRY_QUESTIONS,
-  ...INFORMATION_AND_IDEAS_QUESTIONS,
+  ...INFORMATION_AND_IDEAS_QUESTIONS, ...CRAFT_AND_STRUCTURE_QUESTIONS,
 ];
 
 // The value a student would have to produce: the text of the correct choice, or the accepted response.
@@ -515,5 +516,20 @@ test('answers to "according to the text" questions echo their own passage', () =
     const shared = [...answer].filter(word => passage.has(word));
     assert.ok(shared.length >= 2,
       `${q.id}: its answer shares only ${shared.length} distinctive words with the passage it claims to report`);
+  }
+});
+
+// A reading question that asks about "the underlined sentence" is unanswerable unless something is actually
+// underlined. That was a real bug on the live site: a demo question asked about an underline the reader could
+// not see. The fix was the `underline` field, which names the exact wording so js/app.js can mark it up again.
+// This guards the rule for every original question, including files added later.
+test('reading questions that mention an underline say which words are underlined', () => {
+  for (const q of READING) {
+    if (!/underlin/i.test(`${q.stem} ${q.passage}`)) continue;
+    assert.ok(q.underline?.length, `${q.id}: refers to underlined text but marks none`);
+    for (const part of q.underline) {
+      assert.ok(`${q.passage}\n${q.stem}`.includes(part),
+        `${q.id}: the wording it marks as underlined does not appear in the question`);
+    }
   }
 });
