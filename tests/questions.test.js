@@ -5,13 +5,16 @@ import { DOMAINS, findSkill } from '../js/taxonomy.js';
 import { ALGEBRA_QUESTIONS } from '../js/questions/algebra.js';
 import { ADVANCED_MATH_QUESTIONS } from '../js/questions/advanced-math.js';
 import { PROBLEM_SOLVING_QUESTIONS } from '../js/questions/problem-solving.js';
+import { GEOMETRY_QUESTIONS } from '../js/questions/geometry.js';
 
 // Original questions written for this app. The point of this file is that nothing here trusts the answer
 // recorded in the question: every mathematical answer is worked out again from the wording of the problem,
 // and the two have to agree. A wrong answer key is worse than a missing question, because a student will
 // believe it.
 
-const ORIGINAL = [...ALGEBRA_QUESTIONS, ...ADVANCED_MATH_QUESTIONS, ...PROBLEM_SOLVING_QUESTIONS];
+const ORIGINAL = [
+  ...ALGEBRA_QUESTIONS, ...ADVANCED_MATH_QUESTIONS, ...PROBLEM_SOLVING_QUESTIONS, ...GEOMETRY_QUESTIONS,
+];
 
 // The value a student would have to produce: the text of the correct choice, or the accepted response.
 function answerValue(q) {
@@ -240,6 +243,64 @@ const CHECKS = {
   'og-psda-48': () => null,
   'og-psda-49': () => null,
   'og-psda-50': () => null,
+
+  // ---- Geometry: area and volume ----
+  'og-geo-01': () => 9 * 4,
+  'og-geo-02': () => 0.5 * 10 * 6,
+  'og-geo-03': () => null,
+  'og-geo-04': () => 3 * 4 * 5,
+  'og-geo-05': () => 3 ** 2 * 10,
+  'og-geo-06': () => 6 * Math.cbrt(64) ** 2,
+  'og-geo-07': () => 4 * Math.sqrt(49),
+  'og-geo-08': () => ((6 + 10) / 2) * 4,
+  'og-geo-09': () => (4 / 3) * 3 ** 3,
+  'og-geo-10': () => 12 * 5,
+  'og-geo-11': () => { const w = 36 / 6; return w * (2 * w); },
+  'og-geo-12': () => (1 / 3) * 3 ** 2 * 4,
+  'og-geo-13': () => 120 / 24,
+
+  // ---- Geometry: lines, angles and triangles ----
+  'og-geo-14': () => 180 - 50 - 60,
+  'og-geo-15': () => 180 - 115,
+  'og-geo-16': () => 90 - 37,
+  'og-geo-17': () => (180 - 40) / 2,
+  'og-geo-18': () => 45 + 65,
+  'og-geo-19': () => 180 - 65,
+  'og-geo-20': () => null,
+  'og-geo-21': () => (5 - 2) * 180,
+  'og-geo-22': () => 8 * (3 / 2),
+  'og-geo-23': () => null,
+  'og-geo-24': () => null,
+  'og-geo-25': () => ((6 - 2) * 180) / 6,
+  'og-geo-26': () => (180 / (1 + 2 + 3)) * 3,
+
+  // ---- Geometry: right triangles and trigonometry ----
+  'og-geo-27': () => Math.sqrt(6 ** 2 + 8 ** 2),
+  'og-geo-28': () => Math.sqrt(13 ** 2 - 5 ** 2),
+  'og-geo-29': () => 3 / 5,
+  'og-geo-30': () => 8 / 17,
+  'og-geo-31': () => 7 / 24,
+  'og-geo-32': () => 2 * 5,
+  'og-geo-33': () => null,
+  'og-geo-34': () => Math.cos(Math.PI / 2 - Math.asin(0.6)),
+  'og-geo-35': () => 0.5 * 9 * 12,
+  'og-geo-36': () => 10 * Math.sin(Math.PI / 6),
+  'og-geo-37': () => Math.sin(1.2) ** 2 + Math.cos(1.2) ** 2,
+  'og-geo-38': () => Math.sqrt(15 ** 2 + 20 ** 2),
+
+  // ---- Geometry: circles ----
+  'og-geo-39': () => 2 * 7,
+  'og-geo-40': () => null,
+  'og-geo-41': () => Math.sqrt(49),
+  'og-geo-42': () => 3,
+  'og-geo-43': () => (90 / 360) * 2 * 4,
+  'og-geo-44': () => (60 / 360) * 6 ** 2,
+  'og-geo-45': () => null,
+  'og-geo-46': () => Math.sqrt(36),
+  'og-geo-47': () => 20 / 2,
+  'og-geo-48': () => Math.sqrt(36),
+  'og-geo-49': () => 360,
+  'og-geo-50': () => (Math.PI / 3) * (180 / Math.PI),
 };
 
 // Questions whose answer is not a single number get their own predicate.
@@ -304,6 +365,17 @@ const STRUCTURAL = {
   'og-psda-48': v => v === 'The sample is not representative of the population',
   'og-psda-49': v => v === 'Random selection of subjects',
   'og-psda-50': v => v === 'Participants chose their own group, so the groups may differ in other ways',
+
+  // Answers written with π or a radical would be mangled by num(), which strips everything that is not a
+  // digit, so "6√2" would silently become 62. These pin the wording and verify the value separately.
+  'og-geo-03': v => v === '25π' && nearly(5 ** 2, 25),
+  'og-geo-33': v => v === '6√2' && nearly(Math.sqrt(6 ** 2 + 6 ** 2), 6 * Math.sqrt(2)),
+  'og-geo-40': v => v === '25π' && nearly((10 / 2) ** 2, 25),
+  'og-geo-20': v => v === 'Right' && nearly(3 ** 2 + 4 ** 2, 5 ** 2),
+  'og-geo-23': v => v === 'They are equal in measure',
+  // The third side must lie strictly between the difference and the sum of the other two.
+  'og-geo-24': v => v === '18' && !(12 - 5 < 18 && 18 < 12 + 5),
+  'og-geo-45': v => v === 'The inscribed angle is half the central angle',
 };
 
 test('every original question maps onto the taxonomy', () => {
@@ -375,6 +447,8 @@ test('distractors are never also correct', () => {
     'og-alg-47': v => { const [x, y] = v.replace(/[()−]/g, m => (m === '−' ? '-' : '')).split(',').map(Number); return y > 2 * x + 1; },
     'og-adv-20': v => nearly(num(v) ** 2 + 3 * num(v) - 10, 0),
     'og-adv-30': v => nearly(num(v) ** 2 - 1, 3),
+    // This one asks which length could NOT be the third side, so exactly one choice must fail the inequality.
+    'og-geo-24': v => !(12 - 5 < num(v) && num(v) < 12 + 5),
   };
   for (const [id, holds] of Object.entries(conditions)) {
     const q = ORIGINAL.find(x => x.id === id);
