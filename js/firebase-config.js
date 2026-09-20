@@ -20,4 +20,4 @@ export const FIREBASE_CONFIG = {
 //
 // Set to null to leave App Check unregistered, in which case the app says so plainly rather than failing
 // with a network error.
-export const RECAPTCHA_SITE_KEY = null;
+export const RECAPTCHA_SITE_KEY = '6Leb1cQtAAAAANgYPyrZPKf18MYlbdnShKt68nk1';
