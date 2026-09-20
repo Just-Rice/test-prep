@@ -35,8 +35,11 @@ redistributed. For a real question library:
 - **SAT and PSAT:** export PDFs yourself from the official
   [SAT Suite Educator Question Bank](https://satsuiteeducatorquestionbank.collegeboard.org/) and save them in
   `exports/`. Each question is sorted into the SAT, PSAT/NMSQT or PSAT 8/9 by the assessment it lists.
-- **ACT (still being built):** the ACT's sections, skills, scoring and timed format are in place, but reading ACT's
-  free official practice test PDFs from [act.org](https://www.act.org/) isn't finished yet, so the ACT has no questions.
+- **ACT:** download the free official practice tests from [act.org](https://www.act.org/) and save them in
+  `exports/act/`. Keep the whole booklet: the scoring key at the back is where each question's correct answer and
+  reporting category come from, so a booklet without it cannot be read. The English, math and reading tests are
+  read; the science test is skipped for now, because its questions depend on figures and tables that the reader
+  cannot yet cut out reliably.
 
 `npm start` (or `npm run build`) parses the PDFs into `data/questions.json` plus cropped images for parts that
 contain math, graphs or tables. `exports/` and `data/` are gitignored, so no official content is ever committed.

@@ -1,4 +1,5 @@
-// Builds the question library from College Board Question Bank PDF exports saved in exports/.
+// Builds the question library from the PDFs saved in exports/: College Board Question Bank exports at
+// the top level, and ACT practice test booklets in exports/act/.
 // Runs when the server starts, or on its own with `npm run build`. Output goes to data/: questions.json
 // plus an image for each question part that contains math, graphs or tables. Results are cached per PDF
 // by content hash, so only new or changed exports are processed.
@@ -12,9 +13,10 @@ import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createCanvas } from '@napi-rs/canvas';
 import { readPage } from '../js/cb-pdf.js';
 import { parseExport } from '../js/cb-layout.js';
+import { parseBooklet } from '../js/act-layout.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const FORMAT = 1;           // bump to rebuild every export after changing parsing or rendering
+const FORMAT = 4;           // bump to rebuild every export after changing parsing or rendering
 const RENDER_SCALE = 2.4;   // canvas pixels per PDF point
 const DISPLAY_SCALE = 1.3;  // CSS pixels per PDF point, so the export's 9pt text shows at about 12px
 const PADDING = 4;
@@ -30,15 +32,18 @@ export async function buildQuestions({ exportsDir = join(ROOT, 'exports'), dataD
   await mkdir(imagesDir, { recursive: true });
   await mkdir(cacheDir, { recursive: true });
 
-  const files = existsSync(exportsDir)
-    ? (await readdir(exportsDir)).filter(f => f.toLowerCase().endsWith('.pdf')).sort()
-    : [];
+  const pdfsIn = async dir => (existsSync(dir) ? (await readdir(dir)).filter(f => f.toLowerCase().endsWith('.pdf')).sort() : []);
+  const sources = [
+    ...(await pdfsIn(exportsDir)).map(file => ({ file, path: join(exportsDir, file), kind: 'cb' })),
+    ...(await pdfsIn(join(exportsDir, 'act'))).map(file => ({ file, path: join(exportsDir, 'act', file), kind: 'act' })),
+  ];
+  const files = sources.map(s => s.file);
   const questions = new Map();
   const warnings = [];
   const caches = new Set();
 
-  for (const file of files) {
-    const bytes = await readFile(join(exportsDir, file));
+  for (const { file, path, kind } of sources) {
+    const bytes = await readFile(path);
     const hash = createHash('sha256').update(`${FORMAT}:`).update(bytes).digest('hex').slice(0, 16);
     const cachePath = join(cacheDir, `${hash}.json`);
     caches.add(`${hash}.json`);
@@ -48,10 +53,11 @@ export async function buildQuestions({ exportsDir = join(ROOT, 'exports'), dataD
     if (!result) {
       log(`Building questions from ${file}…`);
       try {
-        result = await buildFile(bytes, file, imagesDir);
+        result = await buildFile(bytes, file, imagesDir, kind);
       } catch (err) {
         // A damaged or half-downloaded PDF shouldn't keep the rest of the library from building.
-        warnings.push(`${file}: could not be read (${err.message}). Is it a complete College Board Question Bank export?`);
+        const expected = kind === 'act' ? 'an ACT practice test booklet' : 'a complete College Board Question Bank export';
+        warnings.push(`${file}: could not be read (${err.message}). Is it ${expected}?`);
         continue;
       }
       await writeFile(cachePath, JSON.stringify(result));
@@ -71,26 +77,56 @@ export async function buildQuestions({ exportsDir = join(ROOT, 'exports'), dataD
   return { questions: list, warnings, files: files.length };
 }
 
-async function buildFile(bytes, fileName, imagesDir) {
+async function buildFile(bytes, fileName, imagesDir, kind) {
   const loading = getDocument({ data: new Uint8Array(bytes), verbosity: 0 });
   const doc = await loading.promise;
   try {
     const pages = [];
     for (let n = 1; n <= doc.numPages; n++) pages.push(await readPage(await doc.getPage(n), OPS));
-    const { questions: parsed, warnings } = parseExport(pages, fileName);
+    const parse = kind === 'act' ? parseBooklet : parseExport;
+    const build = kind === 'act' ? buildActQuestion : buildQuestion;
+    const { questions: parsed, warnings } = parse(pages, fileName);
     const image = createRenderer(doc, imagesDir);
     const questions = [];
     for (const p of parsed) {
       try {
-        questions.push(await buildQuestion(p, image));
+        questions.push(await build(p, image, fileName));
       } catch (err) {
-        warnings.push(`${fileName}: skipped question ${p.cbId}: ${err.message}`);
+        warnings.push(`${fileName}: skipped question ${p.cbId ?? `${p.section} ${p.number}`}: ${err.message}`);
       }
     }
     return { questions, warnings };
   } finally {
     await loading.destroy();
   }
+}
+
+// ACT booklets have no per-question id of their own, so one is made from the booklet's file name and
+// the question's own number, which is what the booklet's scoring key indexes it by.
+const slug = name => name.replace(/\.pdf$/i, '').replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 40);
+
+async function buildActQuestion(p, image, fileName) {
+  const base = `act-${slug(fileName)}-${p.section.toLowerCase()}-${p.number}`;
+  const q = {
+    id: base, source: 'act-export', actNumber: p.number,
+    section: p.section, domain: p.domain, skill: p.skill, answer: p.answer,
+    // ACT does not publish a difficulty for individual questions, and the booklets do not imply one,
+    // so every question sits at the middle of the scale rather than at an invented one.
+    difficulty: 'Medium',
+  };
+  if (p.passage?.text) q.passage = p.passage.text;
+  if (p.passage?.underline) q.underline = p.passage.underline;
+  if (p.stem.needsImage) q.promptImage = await image(p.stem.spans, `${base}-prompt`);
+  else q.stem = p.stem.paragraphs.join('\n\n');
+
+  q.choices = [];
+  for (const c of p.choices) {
+    q.choices.push(c.needsImage
+      ? { letter: c.letter, image: await image(c.spans, `${base}-choice-${c.letter}`) }
+      : { letter: c.letter, text: c.paragraphs.join(' ') });
+  }
+  q.original = await image(p.original.spans, `${base}-original`);
+  return q;
 }
 
 async function buildQuestion(p, image) {

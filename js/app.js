@@ -644,9 +644,10 @@ function renderDrill(headerHtml, source, rerender) {
 // ---------- start: placement or grade ----------
 
 function addQuestionsHint() {
-  // Still being built: the reader for ACT's official practice test PDFs.
+  // ACT questions come from ACT's own practice test booklets, which carry a scoring key at the back;
+  // without that key a booklet has no answers and no reporting categories, so it cannot be read.
   return exam.source === 'act'
-    ? 'wait for the next update: ACT support is still being built, and official ACT practice tests can’t be loaded yet'
+    ? 'save ACT practice test booklets, with the scoring keys at the back, in the <code>exports/act</code> folder and restart the app'
     : `save ${exam.long} exports from the College Board Question Bank in the <code>exports</code> folder and restart the app`;
 }
 
