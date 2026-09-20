@@ -9,11 +9,11 @@
 // Many exported questions are pictures of maths rather than text (the export draws equations and graphs as
 // graphics), so the question image is sent alongside whatever text there is.
 //
-// NOTE: from 2 November 2026 Firebase requires App Check enforcement to use AI Logic. Until App Check is set
-// up in the Firebase console these calls still work, but nothing stops another site spending this project's
-// free quota.
+// App Check is enforced now, not at some future date. Enabling AI Logic switches it on, and an unregistered
+// client is refused outright: the endpoint answers 401 "Firebase App Check token is invalid" rather than
+// producing a hint. So RECAPTCHA_SITE_KEY in js/firebase-config.js is required, not optional.
 
-import { FIREBASE_CONFIG } from './firebase-config.js';
+import { FIREBASE_CONFIG, RECAPTCHA_SITE_KEY } from './firebase-config.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
 const MODEL = 'gemini-3.8-flash';   // free tier on the Gemini Developer API
@@ -26,12 +26,31 @@ let loading = null;
 // One answer per question is enough: asking twice costs another call and says the same thing.
 const answers = new Map();
 
+// Firebase enforces App Check for AI Logic, so the app has to prove it is this site before Gemini will answer.
+// Registration happens once, before the first request; afterwards the SDK refreshes the token on its own.
+//
+// On localhost there is no reCAPTCHA domain to attest against, so a debug token is used instead. Set one by
+// running `self.FIREBASE_APPCHECK_DEBUG_TOKEN = true` in the console once, then registering the token it
+// prints under App Check -> Apps -> Manage debug tokens in the Firebase console.
+let appCheckStarted = false;
+
+async function registerAppCheck(firebaseApp) {
+  if (appCheckStarted || !RECAPTCHA_SITE_KEY) return;
+  appCheckStarted = true;
+  const { initializeAppCheck, ReCaptchaEnterpriseProvider } = await import(`${SDK}/firebase-app-check.js`);
+  initializeAppCheck(firebaseApp, {
+    provider: new ReCaptchaEnterpriseProvider(RECAPTCHA_SITE_KEY),
+    isTokenAutoRefreshEnabled: true,
+  });
+}
+
 async function getModel() {
   if (model) return model;
   loading ||= (async () => {
     const [app, ai] = await Promise.all([import(`${SDK}/firebase-app.js`), import(`${SDK}/firebase-ai.js`)]);
     // Cloud sync may already have started the same Firebase app; reuse it rather than starting a second.
     const firebaseApp = app.getApps().length ? app.getApp() : app.initializeApp(FIREBASE_CONFIG);
+    await registerAppCheck(firebaseApp);
     const backend = ai.getAI(firebaseApp, { backend: new ai.GoogleAIBackend() });
     model = ai.getGenerativeModel(backend, {
       model: MODEL,
@@ -105,14 +124,22 @@ function describeError(err) {
     return 'Gemini isn’t switched on for this Firebase project yet. In the Firebase console open AI Logic, click “Get started”, then try again in a few minutes.';
   }
   if (/quota|429|exhausted/i.test(message)) return 'Gemini’s free daily limit has been reached. Try again tomorrow.';
-  if (/network|fetch|offline/i.test(message)) return 'Could not reach Gemini. Check your internet connection.';
-  if (/app.?check/i.test(message)) return 'Firebase App Check refused the request. Check the App Check setup in the Firebase console.';
+  // App Check must be tested before the network branch. A rejected token arrives as code "fetch-error" with
+  // "Error fetching from ..." in the message, so the network test below swallowed it and told the student to
+  // check their internet connection while the real cause was a 401 for a missing App Check token.
+  if (/app.?check/i.test(message)) {
+    return 'This copy of the app isn’t registered with Firebase App Check, so Gemini refused the request. It needs an App Check site key adding.';
+  }
+  if (/network|offline|failed to fetch/i.test(message)) return 'Could not reach Gemini. Check your internet connection.';
   if (/api.?key|not.?found|404/i.test(message)) return 'Gemini is not set up for this project yet. Enable Firebase AI Logic in the Firebase console.';
   return `Gemini could not answer: ${message}`;
 }
 
 // A full explanation, shown after the student has answered and seen the correct answer.
+const NO_APP_CHECK = 'Gemini needs an App Check site key before it can answer. See RECAPTCHA_SITE_KEY in js/firebase-config.js.';
+
 export async function explainQuestion(q, { chosen, correct, examName = 'SAT' } = {}) {
+  if (!RECAPTCHA_SITE_KEY) throw new Error(NO_APP_CHECK);
   const key = `explain|${q.id}|${chosen ?? ''}`;
   if (answers.has(key)) return answers.get(key);
   const key2 = answerText(q);
@@ -137,6 +164,7 @@ export async function explainQuestion(q, { chosen, correct, examName = 'SAT' } =
 
 // A nudge before answering. The answer is deliberately withheld from the prompt so it cannot leak.
 export async function hintFor(q, { examName = 'SAT' } = {}) {
+  if (!RECAPTCHA_SITE_KEY) throw new Error(NO_APP_CHECK);
   const key = `hint|${q.id}`;
   if (answers.has(key)) return answers.get(key);
   const instruction = [

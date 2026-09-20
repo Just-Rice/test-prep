@@ -9,3 +9,15 @@ export const FIREBASE_CONFIG = {
   messagingSenderId: '1072588919531',
   appId: '1:1072588919531:web:9ba02f3ca05bc0d008a4ae',
 };
+
+// App Check proves that a request really comes from this site, not from somebody who copied the config above.
+// Firebase now enforces it for AI Logic, so without a key here Gemini answers nothing: the request is refused
+// with "Firebase App Check token is invalid".
+//
+// To fill this in: Google Cloud console -> Security -> reCAPTCHA, enable the reCAPTCHA Enterprise API, create
+// a *Website* key with "Use checkbox challenge" left UNCHECKED (App Check needs a score-based key), and list
+// the domain just-rice.github.io. Paste the key below. Like the config above it is not a secret.
+//
+// Set to null to leave App Check unregistered, in which case the app says so plainly rather than failing
+// with a network error.
+export const RECAPTCHA_SITE_KEY = null;
