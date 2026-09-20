@@ -11,6 +11,7 @@
 
 import { FIREBASE_CONFIG } from './firebase-config.js';
 import { mergeProgress, progressFromDocs, syncProgress } from './sync-core.js';
+import { useFirebase } from './library-cloud.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
 // Username accounts are Firebase email/password accounts at a reserved domain that can never receive mail,
@@ -35,7 +36,7 @@ let stopListening = null;
 const state = { phase: syncConfigured ? 'loading' : 'off', message: null, lastSynced: null };
 
 // phase: 'off' (not configured) | 'loading' | 'signed-out' | 'syncing' | 'synced' | 'error'
-export const syncState = () => ({ ...state, account: accountName() });
+export const syncState = () => ({ ...state, account: accountName(), uid: user?.uid ?? null });
 
 function update(patch) {
   Object.assign(state, patch);
@@ -55,6 +56,8 @@ export async function initSync(appHooks, { loadSdk = loadFromCdn } = {}) {
     const { app, auth, firestore } = await loadSdk();
     const firebaseApp = app.initializeApp(FIREBASE_CONFIG);
     fb = { auth, firestore, authInstance: auth.getAuth(firebaseApp), db: firestore.getFirestore(firebaseApp) };
+    // The shared question library rides on the same app and the same sign-in as progress does.
+    useFirebase(fb);
   } catch {
     update({ phase: 'error', message: 'Cloud sync could not load. Check your connection and reload the page.' });
     return;

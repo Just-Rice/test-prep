@@ -16,6 +16,7 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { encodeBundle } from '../js/library-bundle.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SCALE = 0.7;      // of the already-rendered crop
@@ -44,6 +45,7 @@ export async function packQuestions({ dataDir = join(ROOT, 'data'), outDir = joi
 
   let from = 0;
   let to = 0;
+  const packed = new Map();
   for (const name of await readdir(join(dataDir, 'img'))) {
     if (!keep.has(name)) continue;
     const path = join(dataDir, 'img', name);
@@ -56,17 +58,24 @@ export async function packQuestions({ dataDir = join(ROOT, 'data'), outDir = joi
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
     const encoded = await canvas.encode('webp', QUALITY);
     to += encoded.length;
+    packed.set(name, new Uint8Array(encoded));
     await writeFile(join(outImg, name), encoded);
   }
 
   // The stored sizes are CSS pixels, so they stay as they are: the picture is smaller, drawn at the same size.
-  const json = JSON.stringify({ builtAt: built.builtAt, packedAt: new Date().toISOString(), questions });
+  const packedAt = new Date().toISOString();
+  const json = JSON.stringify({ builtAt: built.builtAt, packedAt, questions });
   await writeFile(join(outDir, 'questions.json'), json);
+
+  // One file holding the whole library, which is what gets uploaded for signed-in accounts to read.
+  const bundle = encodeBundle({ questions, images: packed, builtAt: built.builtAt, packedAt });
+  await writeFile(join(outDir, 'bundle.bin'), bundle);
 
   const total = to + Buffer.byteLength(json);
   log(`Packed ${questions.length} questions: ${mb(total)} (${(total / questions.length / 1024).toFixed(1)} KB each)`);
   log(`  images ${mb(from)} -> ${mb(to)}, archive crops dropped, ${keep.size} files kept`);
-  return { questions: questions.length, bytes: total, perQuestion: total / questions.length };
+  log(`  bundle.bin ${mb(bundle.length)}, ready to upload from the Library page`);
+  return { questions: questions.length, bytes: total, bundleBytes: bundle.length, perQuestion: total / questions.length };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

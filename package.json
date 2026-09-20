@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests/*.test.js",
-    "build": "node scripts/build-questions.js"
+    "build": "node scripts/build-questions.js",
+    "pack": "node scripts/pack-questions.js"
   },
   "repository": {
     "type": "git",

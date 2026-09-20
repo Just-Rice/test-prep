@@ -13,6 +13,7 @@ import { mountCalculator } from './calc.js';
 import {
   initSync, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState,
 } from './sync.js';
+import { libraryAccess, loadCloudQuestions, publishLibrary } from './library-cloud.js';
 
 const APP_NAME = 'Test Prep';
 const view = document.getElementById('view');
@@ -35,6 +36,10 @@ let allQuestions = [];
 let pool = [];          // the questions the current test practices with
 let byId = new Map();
 let library = { source: 'demo', files: 0, warnings: [], own: 0, borrowed: false };
+// The questions this device built or ships with, and the shared library downloaded after signing in.
+let baseQuestions = [];
+let cloudQuestions = [];
+let cloudLibrary = { status: 'idle', access: null };
 let session = null;     // the active placement, practice or review session
 let test = null;        // the timed practice test, kept separately so browsing other pages doesn't end it
 let currentRoute = null;
@@ -1791,9 +1796,7 @@ function viewLibrary() {
     return `<tr><td>${sectionShort(d.section)}</td><td>${esc(d.name)}</td><td class="num">${n('Easy')}</td><td class="num">${n('Medium')}</td><td class="num">${n('Hard')}</td><td class="num"><strong>${qs.length}</strong></td></tr>`;
   }).join('');
   const source = !pool.length
-    ? (exam.source === 'act'
-      ? '<p class="note"><strong>ACT support is still being built.</strong> The ACT sections, skills, scoring and timed-test format are ready, but reading ACT’s official practice test PDFs isn’t finished, so there are no ACT questions yet. Until then, the <a href="#/resources">official ACT practice tests</a> are available on act.org.</p>'
-      : `<p class="note">There are no ${exam.long} questions yet. To add them, ${addQuestionsHint()}.</p>`)
+    ? `<p class="note">There are no ${exam.long} questions yet. To add them, ${addQuestionsHint()}.</p>`
     : library.borrowed
       ? `<p class="note">No ${exam.long} questions have been added yet, so ${exam.name} practice uses the ${plural(pool.length, `${library.source === 'demo' ? 'demo' : 'SAT'} question`)}, which cover the same skills. To add ${exam.name} questions, ${addQuestionsHint()}.</p>`
       : library.source === 'demo'
@@ -1803,6 +1806,7 @@ function viewLibrary() {
   view.innerHTML = `
     ${pageHead('Question library', { eyebrow: exam.long })}
     ${source}
+    ${sharedLibraryCard()}
     ${library.warnings.length ? `<div class="card"><h2>Skipped questions</h2>${library.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}</div>` : ''}
     <div class="card">
       <div class="table-wrap"><table>
@@ -1811,6 +1815,61 @@ function viewLibrary() {
       </table></div>
     </div>
     <p class="hint">Appearance, text size and resetting your progress live on the <a href="#/settings">Settings</a> page.</p>`;
+
+  on('#upload-library', 'click', e => uploadSharedLibrary(e.currentTarget));
+}
+
+// Questions built from official PDFs are never part of the site itself, because the repository is
+// public and the PDFs are not ours to publish. Invited accounts get them from the cloud instead.
+function sharedLibraryCard() {
+  if (!syncConfigured) return '';
+  const card = body => `<div class="card"><h2>Shared library</h2>${body}</div>`;
+  if (!syncState().account) {
+    return card(`<p class="hint">Questions built from official College Board and ACT PDFs aren’t part of this
+      site. If you have been invited to the shared library, <a href="#/account">sign in</a> and it will load here.</p>`);
+  }
+
+  const s = cloudLibrary;
+  const packed = s.packedAt ? new Date(s.packedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+  const status = {
+    idle: '<p class="hint">Checking…</p>',
+    checking: '<p class="hint">Checking whether this account has been invited…</p>',
+    'not-invited': `<p class="hint">This account hasn’t been invited to the shared library, so practice uses the
+      questions built into the site. Ask whoever runs this app to add you.</p>`,
+    loading: `<p class="hint">Downloading the shared library${s.progress ? ` — piece ${s.progress.done} of ${s.progress.total}` : ''}…</p>`,
+    empty: '<p class="hint">You’re invited, but no library has been uploaded yet.</p>',
+    ready: `<p class="muted">${plural(s.count, 'question')} from the shared library${packed ? `, packed ${packed}` : ''}.
+      ${s.cached ? 'Already saved on this device, so it loads instantly and works offline.' : `Downloaded ${(s.bytes / 1048576).toFixed(1)} MB and saved on this device.`}</p>`,
+    error: `<p class="warn">${esc(s.message || 'The shared library could not be loaded.')}</p>`,
+  }[s.status] ?? '';
+
+  const admin = s.access === 'admin'
+    ? `<div class="actions"><button class="primary" type="button" id="upload-library">Upload this device’s library</button></div>
+       <p class="hint">Build it first with <code>npm run build</code>, then <code>npm run pack</code>. Everyone on the
+       tester list picks it up the next time they sign in.</p>`
+    : '';
+  return card(status + admin);
+}
+
+async function uploadSharedLibrary(button) {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Reading the packed library…';
+  try {
+    const res = await fetch('data/pack/bundle.bin', { cache: 'no-store' });
+    if (!res.ok) throw new Error('No packed library found. Run npm run build and then npm run pack, then reload this page.');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const result = await publishLibrary(bytes, {
+      onProgress: p => { button.textContent = `Uploading — piece ${p.done} of ${p.total}…`; },
+    });
+    toast(`Shared library updated: ${plural(result.questions, 'question')}`);
+    cloudLibraryFor = null;            // load it back down, so this page shows what testers will get
+    syncCloudLibrary(syncState());
+  } catch (err) {
+    toast(err.message);
+    button.textContent = label;
+    button.disabled = false;
+  }
 }
 
 // ---------- settings ----------
@@ -2081,10 +2140,84 @@ async function loadLibrary() {
 try { indexedDB.deleteDatabase('sat-prep'); } catch { /* storage unavailable */ }
 
 window.addEventListener('hashchange', render);
+// The questions in play. A device that built its own library keeps its own copy of a question, which
+// has sharper images than the packed one the shared library carries; everything else comes from the
+// shared library. Demo questions are only ever a stand-in, so a real library retires them.
+function applyLibrary() {
+  const byId = new Map();
+  for (const q of [...baseQuestions, ...cloudQuestions]) {
+    if (cloudQuestions.length && q.source === 'demo') continue;
+    if (!byId.has(q.id)) byId.set(q.id, q);
+  }
+  allQuestions = [...byId.values()];
+  choosePool();
+}
+
+// The library changes what practice can serve, so pages that count questions are drawn again — never
+// while a question or a timed test is on screen.
+function refreshForLibrary() {
+  if (!session && ['home', 'library', 'plan', 'scores'].includes(currentRoute)) render();
+  else renderNav(currentRoute);
+}
+
+let cloudLibraryFor = null;   // the uid whose library has been looked up already
+
+async function syncCloudLibrary({ uid }) {
+  if (cloudLibraryFor === uid) return;
+  cloudLibraryFor = uid;
+  const stale = () => cloudLibraryFor !== uid;   // signed out, or switched account, while we asked
+
+  if (!uid) {
+    if (cloudQuestions.length) {
+      cloudQuestions = [];
+      applyLibrary();
+    }
+    cloudLibrary = { status: 'idle', access: null };
+    return refreshForLibrary();
+  }
+
+  cloudLibrary = { status: 'checking', access: null };
+  refreshForLibrary();
+  const access = await libraryAccess(uid);
+  if (stale()) return;
+  if (!access) {
+    cloudLibrary = { status: 'not-invited', access: null };
+    return refreshForLibrary();
+  }
+
+  cloudLibrary = { status: 'loading', access };
+  refreshForLibrary();
+  try {
+    const loaded = await loadCloudQuestions({
+      onProgress: progress => {
+        if (stale()) return;
+        cloudLibrary = { ...cloudLibrary, progress };
+        refreshForLibrary();
+      },
+    });
+    if (stale()) return;
+    if (!loaded) {
+      cloudLibrary = { status: 'empty', access };
+    } else {
+      cloudQuestions = loaded.questions;
+      cloudLibrary = {
+        status: 'ready', access, count: loaded.questions.length,
+        packedAt: loaded.packedAt, cached: loaded.cached, bytes: loaded.bytes,
+      };
+      applyLibrary();
+      if (!loaded.cached) toast(`Added ${plural(loaded.questions.length, 'question')} from the shared library`);
+    }
+  } catch (err) {
+    if (stale()) return;
+    cloudLibrary = { status: 'error', access, message: err.message };
+  }
+  refreshForLibrary();
+}
+
 loadLibrary().then(result => {
   library = { ...library, source: result.source, files: result.files, warnings: result.warnings || [] };
-  allQuestions = result.questions;
-  choosePool();
+  baseQuestions = result.questions;
+  applyLibrary();
   render();
   let lastPhase = null;
   initSync({
@@ -2105,6 +2238,7 @@ loadLibrary().then(result => {
       lastPhase = state.account ? (lastPhase === 'synced' ? 'synced' : state.phase) : null;
       renderNav(currentRoute);
       if (currentRoute === 'account') viewAccount();
+      syncCloudLibrary(state);
     },
   });
 });
