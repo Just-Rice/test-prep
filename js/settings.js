@@ -8,7 +8,7 @@
 
 const KEY = 'satprep.settings.v1';
 
-export const DEFAULTS = { theme: 'system', accent: 'pencil', textsize: 'medium', contrast: 'normal', motion: 'full', explain: 'on', originals: 'on' };
+export const DEFAULTS = { theme: 'system', accent: 'pencil', textsize: 'medium', contrast: 'normal', motion: 'full', explain: 'on', originals: 'on', level: 'adaptive' };
 
 // [value, label, description] for each setting, in the order the Settings page shows them.
 export const CHOICES = {
@@ -48,6 +48,14 @@ export const CHOICES = {
   originals: [
     ['on', 'Included', 'Practise with them alongside the official questions, so there are far more to go round.'],
     ['off', 'Official only', 'Only College Board and ACT questions. Fewer of them, so they come round again sooner.'],
+  ],
+  // How hard practice questions are. Chosen on the Practice page itself, where it matters, and kept here
+  // so it stays chosen. Timed tests and the placement test keep their own mix regardless.
+  level: [
+    ['adaptive', 'Matched to me', 'Questions at the level you are likely to get about 70% of right, moving as you improve.'],
+    ['Easy', 'Easy', ''],
+    ['Medium', 'Medium', ''],
+    ['Hard', 'Hard', ''],
   ],
 };
 

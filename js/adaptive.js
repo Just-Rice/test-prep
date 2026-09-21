@@ -67,7 +67,9 @@ export function nextPlacementQuestion(pool, answered, section) {
 // `exclude` holds the questions already served in this practice run. Nothing comes back until everything
 // available has been served, and the caller then starts a fresh cycle (see app.js), so a question is never
 // repeated while unseen ones are still waiting.
-export function nextPracticeQuestion(pool, progress, section, { skill, exam = EXAMS.sat, exclude } = {}) {
+// difficulty: 'Easy', 'Medium' or 'Hard' when the student has chosen one; otherwise questions are matched
+// to their estimated ability, as below.
+export function nextPracticeQuestion(pool, progress, section, { skill, exam = EXAMS.sat, exclude, difficulty } = {}) {
   const grade = progress.profile.mode === 'grade' && !progress.placement?.[section] ? progress.profile.grade : null;
   const allowed = new Set((grade ? skillsForGradeOf(exam, section, grade) : skillsOf(exam, section)).map(s => s.name));
   if (skill) allowed.add(skill); // a skill the student picks themselves is served regardless of grade
@@ -76,16 +78,23 @@ export function nextPracticeQuestion(pool, progress, section, { skill, exam = EX
   const lastSeen = new Map(progress.responses.map(r => [r.qid, r.at]));
   const available = pool.filter(q => q.section === section && allowed.has(q.skill) && !exclude?.has(q.id));
   if (!available.length) return null;
+  // A difficulty the student chose narrows what is served. Where there is nothing at that level — a skill
+  // with no hard questions yet — the rest of it is served rather than nothing at all.
+  const atLevel = list => {
+    const matching = difficulty ? list.filter(q => q.difficulty === difficulty) : list;
+    return matching.length ? matching : list;
+  };
 
   let skillName = skill;
   if (!skillName) {
     // Weight skills toward weakness; untouched skills get a boost so everything gets sampled.
-    const withQuestions = abilities.filter(s => available.some(q => q.skill === s.name));
+    const choosable = atLevel(available);
+    const withQuestions = abilities.filter(s => choosable.some(q => q.skill === s.name));
     const weights = withQuestions.map(s => Math.exp(-s.theta) * (s.answered < 3 ? 2 : 1));
     skillName = weightedPick(withQuestions, weights)?.name;
   }
   const est = abilities.find(s => s.name === skillName) || sectionAbility(progress, section, exam);
-  const inSkill = available.filter(q => q.skill === skillName);
+  const inSkill = atLevel(available.filter(q => q.skill === skillName));
   const unseen = inSkill.filter(q => !lastSeen.has(q.id));
   // Once every question in the skill has been answered before, the least recently seen half comes round again.
   const stale = [...inSkill].sort((a, c) => (lastSeen.get(a.id) ?? 0) - (lastSeen.get(c.id) ?? 0)).slice(0, Math.ceil(inSkill.length / 2));

@@ -806,7 +806,7 @@ function viewPlaced() {
 // is never the next one, so practice never repeats itself while unseen questions are still waiting.
 function pickPracticeQuestion(section) {
   session.served ||= new Set();
-  const options = { skill: session.skill || undefined, exam };
+  const options = { skill: session.skill || undefined, exam, difficulty: settings.level === 'adaptive' ? undefined : settings.level };
   let q = nextPracticeQuestion(pool, progress, section, { ...options, exclude: session.served });
   if (!q && session.served.size) {
     session.served = new Set(session.lastId ? [session.lastId] : []);
@@ -829,14 +829,21 @@ function viewPractice(arg) {
     session.st = newDrillState();
   }
   const skills = skillsOf(exam, section).filter(s => pool.some(q => q.section === section && q.skill === s.name));
+  // Offered only where there is a real choice: every ACT question is "Medium", because ACT does not
+  // publish difficulties, so picking a level there would change nothing.
+  const levels = new Set(pool.filter(q => q.section === section).map(q => q.difficulty));
+  const levelPicker = levels.size > 1 ? `
+      <select id="level" aria-label="Difficulty">
+        ${CHOICES.level.map(([value, label]) => `<option value="${value}" ${settings.level === value ? 'selected' : ''}>${value === 'adaptive' ? `Difficulty: ${label.toLowerCase()}` : label}</option>`).join('')}
+      </select>` : '';
   const header = `
-    ${pageHead('Practice', { eyebrow: `${exam.long} · adaptive practice` })}
+    ${pageHead('Practice', { eyebrow: `${exam.long} · ${settings.level === 'adaptive' || levels.size < 2 ? 'adaptive practice' : `${settings.level.toLowerCase()} questions`}` })}
     <div class="bar">
       <div class="seg">${exam.sections.map(s => `<a href="#/practice/${s.id}" class="${s.id === section ? 'active' : ''}">${s.name}</a>`).join('')}</div>
       <select id="skill" aria-label="Skill">
         <option value="">Adaptive: focus on weak spots</option>
         ${skills.map(s => `<option ${s.name === session.skill ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
-      </select>
+      </select>${levelPicker}
       <span class="tally">${session.correct}/${session.done} this session · ${answeredToday()}/${progress.plan.dailyGoal} today</span>
     </div>`;
   if (!session.q) {
@@ -846,6 +853,13 @@ function viewPractice(arg) {
   }
   on('#skill', 'change', e => {
     Object.assign(session, { skill: e.target.value, q: null, served: new Set(), lastId: null });
+    viewPractice(section);
+  });
+  on('#level', 'change', e => {
+    settings = { ...settings, level: e.target.value };
+    saveSettings(settings);
+    // The question on screen was chosen for the old level, so a new one is picked for the new level.
+    Object.assign(session, { q: null, served: new Set(), lastId: null });
     viewPractice(section);
   });
 }

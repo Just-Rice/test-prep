@@ -163,6 +163,28 @@ test('questions that refer to underlined text say which text is underlined', () 
   for (const q of askAboutUnderline) assert.ok(q.underline?.length, `${q.id}: asks about underlined text but marks none`);
 });
 
+test('a chosen difficulty is the only one served while any questions are left at it', () => {
+  const progress = { ...blankProgress(), profile: { mode: 'grade', grade: 12 } };
+  for (const level of ['Easy', 'Medium', 'Hard']) {
+    const count = DEMO_QUESTIONS.filter(q => q.section === 'MATH' && q.difficulty === level).length;
+    assert.ok(count > 0, `the demo pool has ${level} math questions`);
+    const served = new Set();
+    for (let k = 0; k < count; k++) {
+      const q = nextPracticeQuestion(DEMO_QUESTIONS, progress, 'MATH', { difficulty: level, exclude: served });
+      assert.equal(q.difficulty, level, `turn ${k + 1} of ${level}`);
+      served.add(q.id);
+    }
+  }
+});
+
+test('a skill with nothing at the chosen difficulty still serves its other questions', () => {
+  const progress = { ...blankProgress(), profile: { mode: 'grade', grade: 12 } };
+  const base = DEMO_QUESTIONS.find(q => q.section === 'MATH');
+  const easyOnly = [{ ...base, id: 'e1', difficulty: 'Easy' }, { ...base, id: 'e2', difficulty: 'Easy' }];
+  const q = nextPracticeQuestion(easyOnly, progress, 'MATH', { skill: base.skill, difficulty: 'Hard' });
+  assert.ok(q && ['e1', 'e2'].includes(q.id), 'an easy question rather than nothing');
+});
+
 test('a skill the student picks is served even above their grade', () => {
   const progress = { ...blankProgress(), profile: { mode: 'grade', grade: 8 } };
   const advanced = DEMO_QUESTIONS.find(q => q.section === 'MATH' && findSkill(q.skill).minGrade > 8);
