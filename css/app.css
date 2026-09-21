@@ -690,6 +690,9 @@ button, .button { font-size: calc(15px * var(--text-scale)); }
    the start state only during the delay, so content can never be gated behind an animation that fails to run.
    The delays are kept under a tenth of a second for the same reason. */
 #view > * { animation: rise 0.26s cubic-bezier(0.2, 0.7, 0.3, 1); }
+/* A redraw nobody asked for — the shared question library arriving and changing the counts — updates
+   the page in place. Animating it in again reads as the whole screen glitching. */
+#view[data-quiet] > * { animation: none; }
 #view > *:nth-child(2) { animation-delay: 0.03s; }
 #view > *:nth-child(3) { animation-delay: 0.05s; }
 #view > *:nth-child(4) { animation-delay: 0.07s; }

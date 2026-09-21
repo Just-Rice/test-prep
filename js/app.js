@@ -243,9 +243,13 @@ const ROUTES = {
   settings: [viewSettings, 'Settings'], account: [viewAccount, 'Account'],
 };
 
-function render() {
+// quiet: this redraw is not a reader's own navigation but the page catching up with something that
+// arrived on its own, so it appears without the entry animation. Replaying that animation over a page
+// somebody is already reading looks like the screen glitching.
+function render({ quiet = false } = {}) {
   clearInterval(ticker);
   view.removeAttribute('data-loading'); // the app started, so index.html's load-error fallback stands down
+  view.toggleAttribute('data-quiet', quiet);
   const [name, arg] = location.hash.replace(/^#\/?/, '').split('/');
   const route = ROUTES[name] ? name : 'home';
   // Leaving a running test keeps its clock going; bank the time spent and highlights on the open question.
@@ -258,8 +262,18 @@ function render() {
   if (session && !sessionBelongsTo(route)) session = null;
   document.title = `${ROUTES[route][1]} · ${exam.name} · ${APP_NAME}`;
   renderNav(route);
-  window.scrollTo(0, 0);
+  if (!quiet) window.scrollTo(0, 0);   // a quiet redraw must not throw away where somebody was reading
   ROUTES[route][0](arg);
+  // The attribute stays until the next render, which sets it again for what that render is. Taking it
+  // off any earlier is what starts the animation: giving an element back an `animation` property runs
+  // it, so clearing the flag a frame later made the page fade in a frame late instead of not at all.
+}
+
+// Draw one view again without the entry animation, for the same reason render's `quiet` exists. The
+// flag is left set for render to clear, for the reason given there.
+function quietly(draw) {
+  view.toggleAttribute('data-quiet', true);
+  draw();
 }
 
 function sessionBelongsTo(route) {
@@ -1823,7 +1837,7 @@ function viewLibrary() {
 // public and the PDFs are not ours to publish. Invited accounts get them from the cloud instead.
 function sharedLibraryCard() {
   if (!syncConfigured) return '';
-  const card = body => `<div class="card"><h2>Shared library</h2>${body}</div>`;
+  const card = body => `<div class="card" id="shared-library"><h2>Shared library</h2>${body}</div>`;
   if (!syncState().account) {
     return card(`<p class="hint">Questions built from official College Board and ACT PDFs aren’t part of this
       site. If you have been invited to the shared library, <a href="#/account">sign in</a> and it will load here.</p>`);
@@ -2153,10 +2167,20 @@ function applyLibrary() {
   choosePool();
 }
 
-// The library changes what practice can serve, so pages that count questions are drawn again — never
-// while a question or a timed test is on screen.
-function refreshForLibrary() {
-  if (!session && ['home', 'library', 'plan', 'scores'].includes(currentRoute)) render();
+// The library arriving changes what practice can serve, so pages that count questions have to catch
+// up — but only once the questions themselves have actually changed. While the download is still
+// going, the only thing that moves is the status card on the Library page, which is swapped in place
+// so the rest of the page is left alone. Nothing is redrawn during a question or a timed test.
+function refreshForLibrary({ questionsChanged = false } = {}) {
+  const card = view.querySelector('#shared-library');
+  if (card) {
+    quietly(() => {
+      card.outerHTML = sharedLibraryCard();
+      on('#upload-library', 'click', e => uploadSharedLibrary(e.currentTarget));
+    });
+  }
+  if (!questionsChanged) return renderNav(currentRoute);
+  if (!session && ['home', 'library', 'plan', 'scores'].includes(currentRoute)) render({ quiet: true });
   else renderNav(currentRoute);
 }
 
@@ -2168,12 +2192,13 @@ async function syncCloudLibrary({ uid }) {
   const stale = () => cloudLibraryFor !== uid;   // signed out, or switched account, while we asked
 
   if (!uid) {
-    if (cloudQuestions.length) {
+    const had = cloudQuestions.length > 0;
+    if (had) {
       cloudQuestions = [];
       applyLibrary();
     }
     cloudLibrary = { status: 'idle', access: null };
-    return refreshForLibrary();
+    return refreshForLibrary({ questionsChanged: had });
   }
 
   cloudLibrary = { status: 'checking', access: null };
@@ -2187,6 +2212,7 @@ async function syncCloudLibrary({ uid }) {
 
   cloudLibrary = { status: 'loading', access };
   refreshForLibrary();
+  let questionsChanged = false;
   try {
     const loaded = await loadCloudQuestions({
       onProgress: progress => {
@@ -2205,13 +2231,14 @@ async function syncCloudLibrary({ uid }) {
         packedAt: loaded.packedAt, cached: loaded.cached, bytes: loaded.bytes,
       };
       applyLibrary();
+      questionsChanged = true;
       if (!loaded.cached) toast(`Added ${plural(loaded.questions.length, 'question')} from the shared library`);
     }
   } catch (err) {
     if (stale()) return;
     cloudLibrary = { status: 'error', access, message: err.message };
   }
-  refreshForLibrary();
+  refreshForLibrary({ questionsChanged });
 }
 
 loadLibrary().then(result => {
@@ -2230,14 +2257,15 @@ loadLibrary().then(result => {
       if (id !== examId) return renderNav(currentRoute);
       if (!hadProfile && progress.profile.mode && currentRoute === 'start') return go('home');
       // Refresh pages that only show progress; never re-render mid-question, mid-test or mid-form.
-      if (!session && ['home', 'scores', 'review', 'account'].includes(currentRoute)) render();
+      // Quietly, because progress arriving from another device is not navigation the reader asked for.
+      if (!session && ['home', 'scores', 'review', 'account'].includes(currentRoute)) render({ quiet: true });
       else renderNav(currentRoute);
     },
     onChange: state => {
       if (state.account && state.phase === 'synced' && lastPhase === 'syncing' && !state.lastSyncedToastShown) toast('Synced');
       lastPhase = state.account ? (lastPhase === 'synced' ? 'synced' : state.phase) : null;
       renderNav(currentRoute);
-      if (currentRoute === 'account') viewAccount();
+      if (currentRoute === 'account') quietly(viewAccount);
       syncCloudLibrary(state);
     },
   });
