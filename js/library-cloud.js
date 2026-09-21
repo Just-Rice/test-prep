@@ -29,7 +29,9 @@ const MANIFEST = 'manifest';
 const DB_NAME = 'satprep-library';
 const DB_VERSION = 2;
 const CACHE_KEY = 'current';
-const UPLOADS_AT_ONCE = 8;
+const UPLOADS_AT_ONCE = 8;            // deletions of pictures no longer used, sent side by side
+const BATCH_WRITES = 400;             // Firestore's own limit is 500 writes in one batch
+const BATCH_BYTES = 4 * 1024 * 1024;  // and 10 MiB in one request
 
 let fb = null;
 
@@ -136,12 +138,32 @@ export async function publishLibrary({ library, ids, packedAt, questions, readPi
   const wanted = [...ids];
   const toSend = wanted.filter(id => !already.has(id));
 
+  // Pictures go up in batches. Sent one write at a time the web SDK manages about three a second, which
+  // is three-quarters of an hour for a full library; a batch commits hundreds in one request. Firestore
+  // allows 500 writes and 10 MiB in a batch, and these stay well inside both.
+  const { writeBatch } = fb.firestore;
   let sent = 0;
+  let batch = writeBatch(fb.db);
+  let inBatch = 0;
+  let batchBytes = 0;
+  const commit = async () => {
+    if (!inBatch) return;
+    await batch.commit();
+    sent += inBatch;
+    onProgress({ phase: 'pictures', done: sent, total: toSend.length });
+    batch = writeBatch(fb.db);
+    inBatch = 0;
+    batchBytes = 0;
+  };
   onProgress({ phase: 'pictures', done: 0, total: toSend.length });
-  await eachAtOnce(toSend, UPLOADS_AT_ONCE, async id => {
-    await setDoc(pictureDoc(id), { data: Bytes.fromUint8Array(await readPicture(id)) });
-    onProgress({ phase: 'pictures', done: ++sent, total: toSend.length });
-  });
+  for (const id of toSend) {
+    const bytes = await readPicture(id);
+    if (inBatch >= BATCH_WRITES || batchBytes + bytes.length > BATCH_BYTES) await commit();
+    batch.set(pictureDoc(id), { data: Bytes.fromUint8Array(bytes) });
+    inBatch++;
+    batchBytes += bytes.length;
+  }
+  await commit();
 
   const chunks = Math.ceil(library.length / CHUNK_BYTES);
   for (let i = 0; i < chunks; i++) {
