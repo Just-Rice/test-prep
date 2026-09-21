@@ -1,13 +1,14 @@
-// How the app looks and moves: theme, accent colour, text size, contrast and animation. These describe the
-// screen in front of the student rather than their progress, so they stay on the device and are deliberately
-// not part of cloud sync — a phone and a laptop can reasonably want different settings.
+// How the app looks and moves — theme, accent colour, text size, contrast and animation — plus two choices
+// about what it offers: AI help, and whether the questions written for this app are mixed in with the
+// official ones. These stay on the device and are deliberately not part of cloud sync; a phone and a
+// laptop can reasonably want different settings.
 //
 // Each setting becomes a data- attribute on <html>, which css/app.css styles. index.html applies the saved
 // values before the first paint so the page never flashes the wrong theme or size.
 
 const KEY = 'satprep.settings.v1';
 
-export const DEFAULTS = { theme: 'system', accent: 'pencil', textsize: 'medium', contrast: 'normal', motion: 'full', explain: 'on' };
+export const DEFAULTS = { theme: 'system', accent: 'pencil', textsize: 'medium', contrast: 'normal', motion: 'full', explain: 'on', originals: 'on' };
 
 // [value, label, description] for each setting, in the order the Settings page shows them.
 export const CHOICES = {
@@ -41,6 +42,12 @@ export const CHOICES = {
   explain: [
     ['on', 'On', 'Ask for a hint before answering, or an explanation afterwards.'],
     ['off', 'Off', 'No AI help, and nothing about your questions leaves this device.'],
+  ],
+  // The 400 questions written for this app, as opposed to the official ones from College Board and ACT.
+  // Leaving them out never leaves a test with nothing: see choosePool in app.js.
+  originals: [
+    ['on', 'Included', 'Practise with them alongside the official questions, so there are far more to go round.'],
+    ['off', 'Official only', 'Only College Board and ACT questions. Fewer of them, so they come round again sooner.'],
   ],
 };
 

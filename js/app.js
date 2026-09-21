@@ -109,12 +109,24 @@ function dedupe(questions) {
   return [...byKey.values()];
 }
 
+const isOfficial = q => q.source === 'cb-export' || q.source === 'act-export';
+
 function choosePool() {
   const own = allQuestions.filter(q => examOfQuestion(q) === examId);
   const borrow = !own.length && exam.source === 'cb';
-  pool = dedupe(borrow ? allQuestions.filter(q => examOfQuestion(q) === 'sat') : own);
+  const candidates = borrow ? allQuestions.filter(q => examOfQuestion(q) === 'sat') : own;
+  // "Official only" leaves out the questions written for this app. A test with no official questions
+  // yet keeps them anyway: switching it off there would leave nothing to practise at all, which helps
+  // nobody, and the Library page says that is what happened.
+  const official = candidates.filter(isOfficial);
+  const wantsOfficial = settings.originals === 'off';
+  pool = dedupe(wantsOfficial && official.length ? official : candidates);
   byId = new Map(pool.map(q => [q.id, q]));
-  library = { ...library, own: own.length, borrowed: borrow && pool.length > 0 };
+  library = {
+    ...library, own: own.length, borrowed: borrow && pool.length > 0,
+    originalsHidden: wantsOfficial && official.length > 0,
+    originalsKept: wantsOfficial && !official.length && candidates.length > 0,
+  };
 }
 
 function setExam(id) {
@@ -1817,9 +1829,16 @@ function viewLibrary() {
         ? `<p class="note">No official questions are built in yet, so ${plural(pool.length, 'demo question')} are in use. To add real ones, ${addQuestionsHint()}.</p>`
         : `<p class="muted">${plural(pool.length, `${exam.name} question`)}. To add more, ${addQuestionsHint()}.</p>`;
 
+  const originalsNote = library.originalsHidden
+    ? '<p class="hint">Official questions only: the ones written for this app are switched off in <a href="#/settings">Settings</a>.</p>'
+    : library.originalsKept
+      ? `<p class="hint">You chose official questions only, but there are no official ${exam.name} questions yet, so the ones written for this app are in use. Change it in <a href="#/settings">Settings</a>.</p>`
+      : '';
+
   view.innerHTML = `
     ${pageHead('Question library', { eyebrow: exam.long })}
     ${source}
+    ${originalsNote}
     ${sharedLibraryCard()}
     ${library.warnings.length ? `<div class="card"><h2>Skipped questions</h2>${library.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}</div>` : ''}
     <div class="card">
@@ -1895,6 +1914,7 @@ const SETTING_GROUPS = [
   ['contrast', 'Contrast', 'Turn this up if text or borders are hard to make out.'],
   ['motion', 'Animation', 'How much the app moves as pages and answers appear.'],
   ['explain', 'Explain with AI', 'A hint before you answer, and an explanation afterwards, written by Google’s Gemini. Questions you ask about are sent to Google.'],
+  ['originals', 'Questions written for this app', 'Alongside the official College Board and ACT questions there are 400 SAT-style ones written for this app, each answer checked by a test. Your progress on them is kept either way.'],
 ];
 
 function viewSettings() {
@@ -1902,7 +1922,9 @@ function viewSettings() {
     ${pageHead('Settings', { eyebrow: APP_NAME })}
     <p class="muted">These settings belong to this device, not your account, so a phone and a laptop can each be set up the way that suits them.</p>
     <div class="settings-grid">
-      ${SETTING_GROUPS.filter(([key]) => key !== 'explain' || explainConfigured).map(([key, title, note]) => `
+      ${SETTING_GROUPS.filter(([key]) => (key !== 'explain' || explainConfigured)
+        // Without any official questions the written ones are all there is, so the choice would do nothing.
+        && (key !== 'originals' || allQuestions.some(isOfficial))).map(([key, title, note]) => `
         <section class="card setting">
           <h2 id="set-${key}">${title}</h2>
           <p class="hint">${note}</p>
@@ -1939,8 +1961,14 @@ function viewSettings() {
     settings = { ...settings, [set]: value };
     saveSettings(settings);
     applySettings(settings);
+    if (set === 'originals') {
+      // Which questions exist changes, so practice has to start again from the new set.
+      session = null;
+      choosePool();
+      renderNav(currentRoute);
+    }
     viewSettings();
-    toast('Saved');
+    toast(set === 'originals' ? `Saved: ${plural(pool.length, `${exam.name} question`)} now in use` : 'Saved');
   });
   confirmButton('#reset', 'Click again to erase progress', () => {
     // The reset time travels with synced progress, so every signed-in device drops what came before it.
