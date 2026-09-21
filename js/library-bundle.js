@@ -1,98 +1,51 @@
-// The packed question library as a single block of bytes, so it can be carried to the live site.
+// The shared question library as it travels to invited accounts.
 //
-// The library is mostly pictures: the College Board export draws equations, graphs and tables as
-// graphics, and so do ACT's booklets, so about half of every question is a cropped image. Those
-// cannot go in JSON without base64, which would make them a third larger again, so the bundle keeps
-// the question text as JSON and the images as raw bytes after it:
+// It travels in two parts. The questions go as one small file of gzipped JSON, in which every picture is
+// replaced by an id: the first 20 hex digits of a SHA-256 of the picture's own bytes. The pictures go
+// separately, each on its own, and are fetched only when a question that shows one comes up.
 //
-//   bytes 0-3   how long the header is, as a 32-bit little-endian number
-//   header      UTF-8 JSON: the questions, plus where each image sits in the block below
-//   images      every image, one after another, exactly as it was encoded
+// That split is what lets the library grow. Built from the full Question Bank it is about 90 MB, almost
+// all of it pictures, and more than half of those are worked solutions nobody sees until they have
+// answered. Sending all of it to every tester would have meant 90 MB on a phone before the first question,
+// and a Firebase free plan that runs out of monthly downloads after a few testers. The questions alone come
+// to about a megabyte. Naming a picture by its contents also means an unchanged picture is never uploaded
+// twice, and identical pictures are stored once.
 //
-// Nothing here knows about Firebase or the DOM, so the packer builds a bundle in Node and the browser
-// takes one apart with the same code.
+// Nothing here knows about Firebase or the DOM, so the packer writes a library in Node and the browser reads
+// it back with the same code. Compression uses the platform's CompressionStream, which both have.
 
-const VERSION = 1;
-const HEADER_BYTES = 4;
+const VERSION = 2;
 
-const nameOf = src => String(src).split('/').pop();
-
-// questions: the packed questions, whose image srcs name files in `images`.
-// images: Map or object of file name -> Uint8Array.
-export function encodeBundle({ questions, images, builtAt = null, packedAt = new Date().toISOString() }) {
-  const entries = [...(images instanceof Map ? images : new Map(Object.entries(images)))];
-  const index = [];
-  let offset = 0;
-  for (const [name, bytes] of entries) {
-    index.push([name, offset, bytes.length]);
-    offset += bytes.length;
-  }
-
-  const header = new TextEncoder().encode(JSON.stringify({ v: VERSION, builtAt, packedAt, questions, images: index }));
-  const out = new Uint8Array(HEADER_BYTES + header.length + offset);
-  new DataView(out.buffer).setUint32(0, header.length, true);
-  out.set(header, HEADER_BYTES);
-  let at = HEADER_BYTES + header.length;
-  for (const [, bytes] of entries) {
-    out.set(bytes, at);
-    at += bytes.length;
-  }
-  return out;
+// Every place a question keeps a picture.
+export function picturesOf(q) {
+  return [q.promptImage, q.answerImage, q.rationaleImage, q.original, ...(q.choices || []).map(c => c?.image)].filter(Boolean);
 }
 
-export function decodeBundle(bytes) {
-  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  if (data.length < HEADER_BYTES) throw new Error('the library bundle is empty');
-  const headerLength = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0, true);
-  const start = HEADER_BYTES + headerLength;
-  if (!headerLength || start > data.length) throw new Error('the library bundle is damaged');
+// The id of every picture a set of questions uses.
+export function pictureIds(questions) {
+  const ids = new Set();
+  for (const q of questions) for (const picture of picturesOf(q)) if (picture.id) ids.add(picture.id);
+  return ids;
+}
 
-  let header;
+async function transform(bytes, stream) {
+  const piped = new Blob([bytes]).stream().pipeThrough(stream);
+  return new Uint8Array(await new Response(piped).arrayBuffer());
+}
+
+export async function encodeLibrary({ questions, builtAt = null, packedAt = new Date().toISOString() }) {
+  const json = new TextEncoder().encode(JSON.stringify({ v: VERSION, builtAt, packedAt, questions }));
+  return transform(json, new CompressionStream('gzip'));
+}
+
+export async function decodeLibrary(bytes) {
+  let library;
   try {
-    header = JSON.parse(new TextDecoder().decode(data.subarray(HEADER_BYTES, start)));
+    library = JSON.parse(new TextDecoder().decode(await transform(bytes, new DecompressionStream('gzip'))));
   } catch {
-    throw new Error('the library bundle is damaged');
+    throw new Error('the shared library is damaged');
   }
-  if (header.v !== VERSION) throw new Error(`this library was packed by a different version (${header.v})`);
-
-  const images = new Map();
-  for (const [name, offset, length] of header.images) {
-    const from = start + offset;
-    if (from + length > data.length) throw new Error('the library bundle is missing some images');
-    images.set(name, data.subarray(from, from + length));
-  }
-  return { builtAt: header.builtAt, packedAt: header.packedAt, questions: header.questions, images };
-}
-
-// Every image a set of questions refers to, by file name.
-export function imageNames(questions) {
-  const names = new Set();
-  for (const q of questions) {
-    for (const image of [q.promptImage, q.answerImage, q.rationaleImage, q.original, ...(q.choices || []).map(c => c.image)]) {
-      if (image?.src) names.add(nameOf(image.src));
-    }
-  }
-  return names;
-}
-
-// Points every image in `questions` at a URL made from the bundle's own bytes, so the questions can be
-// shown without the files they were built from. `urlFor` turns one image's bytes into a URL.
-export function attachImages(questions, images, urlFor) {
-  const urls = new Map();
-  const link = image => {
-    if (!image?.src) return image;
-    const name = nameOf(image.src);
-    const bytes = images.get(name);
-    if (!bytes) return null;      // an image that did not travel: the part is dropped rather than broken
-    if (!urls.has(name)) urls.set(name, urlFor(bytes, name));
-    return { ...image, src: urls.get(name) };
-  };
-  return questions.map(q => ({
-    ...q,
-    promptImage: link(q.promptImage),
-    answerImage: link(q.answerImage),
-    rationaleImage: link(q.rationaleImage),
-    original: link(q.original),
-    choices: q.choices?.map(c => (c.image ? { ...c, image: link(c.image) } : c)) ?? q.choices,
-  }));
+  if (library?.v !== VERSION) throw new Error(`this library was packed by a different version (${library?.v})`);
+  if (!Array.isArray(library.questions)) throw new Error('the shared library is damaged');
+  return { builtAt: library.builtAt, packedAt: library.packedAt, questions: library.questions };
 }

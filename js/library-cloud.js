@@ -2,29 +2,34 @@
 //
 // The questions built from College Board exports and ACT booklets are never committed, so the live
 // site has only the questions written for this app. This module is how an invited account gets the
-// rest: an admin uploads the packed bundle once, and anyone on the admin or tester list downloads it
-// the next time they sign in.
+// rest: an admin uploads the packed library once, and anyone on the admin or tester list gets it the
+// next time they sign in.
 //
-// It all goes in Cloud Firestore. Cloud Storage would be the natural home for the images, but a
-// Firebase project now needs a billing account before a storage bucket can be created at all, and
-// this project runs on the free Spark plan. Firestore's free allowance is 1 GiB stored and 50,000
-// reads a day, and the whole library is about 2 MB read once per device, so it fits with room to
-// spare. A document may hold 1 MiB, so the bundle is split across a handful of them:
+// It all goes in Cloud Firestore. Cloud Storage would be the natural home for the pictures, but a
+// Firebase project now needs a billing account before a storage bucket can be created at all, and this
+// project runs on the free Spark plan. The library travels in two parts (see library-bundle.js):
 //
-//   library/manifest   what version is up there, and how many pieces it is in
-//   library/chunk-N    one piece of the bundle, stored as bytes rather than base64 text
+//   library/manifest            which version is up, how many pieces the questions are in, and the id of
+//                               every picture that has been uploaded
+//   library/chunk-N             the gzipped questions, split because a document holds at most 1 MiB
+//   library/images/items/<id>   one picture, stored as bytes, named by the hash of its contents
 //
-// Who may read or replace it is decided by firestore.rules, from the admins/ and testers/ lists that
-// no client can write to. A downloaded library is kept in IndexedDB, so it costs one read to check
-// the version on later visits and nothing at all to use it offline.
+// A tester downloads the questions once, about a megabyte, and each picture the first time a question
+// shows it. Both are kept in IndexedDB, so later visits cost one read to check the version, and anything
+// already seen works offline. That keeps well inside the free plan's 50,000 reads a day and its monthly
+// download allowance, which the whole library sent to everyone would not.
+//
+// Who may read or replace any of it is decided by firestore.rules, from the admins/ and testers/ lists
+// that no client can write to; everything here sits under library/, which those rules already cover.
 
-import { decodeBundle, attachImages } from './library-bundle.js';
+import { decodeLibrary } from './library-bundle.js';
 
 const CHUNK_BYTES = 700 * 1024;     // a Firestore document holds 1 MiB; this leaves room for overhead
 const MANIFEST = 'manifest';
 const DB_NAME = 'satprep-library';
-const STORE = 'bundle';
+const DB_VERSION = 2;
 const CACHE_KEY = 'current';
+const UPLOADS_AT_ONCE = 8;
 
 let fb = null;
 
@@ -34,6 +39,9 @@ export function useFirebase(handles) {
 }
 
 export const libraryConfigured = () => Boolean(fb);
+
+const pictureDoc = id => fb.firestore.doc(fb.db, 'library', 'images', 'items', id);
+const listOf = text => (text ? text.split(',') : []);
 
 // ---------- who may see it ----------
 
@@ -61,133 +69,163 @@ export async function readManifest() {
   return snap.exists() ? snap.data() : null;
 }
 
-// The bundle's bytes: from this device's copy when it is already the current version, otherwise from
+// The questions: from this device's copy when it is already the current version, otherwise from
 // Firestore. Returns null when no library has been uploaded yet.
-export async function fetchBundle({ onProgress = () => {} } = {}) {
+export async function loadCloudQuestions({ onProgress = () => {} } = {}) {
   const manifest = await readManifest();
   if (!manifest) return null;
 
-  const cached = await readCache();
+  let bytes = null;
+  const cached = await cacheGet('core', CACHE_KEY);
   if (cached?.version === manifest.version) {
+    bytes = new Uint8Array(cached.bytes);
     onProgress({ done: manifest.chunks, total: manifest.chunks, cached: true });
-    return { bytes: cached.bytes, manifest, cached: true };
+  } else {
+    const { doc, getDoc } = fb.firestore;
+    const pieces = [];
+    for (let i = 0; i < manifest.chunks; i++) {
+      const snap = await getDoc(doc(fb.db, 'library', `chunk-${i}`));
+      if (!snap.exists()) throw new Error(`the library is incomplete in the cloud (piece ${i + 1} of ${manifest.chunks} is missing)`);
+      pieces.push(snap.data().data.toUint8Array());
+      onProgress({ done: i + 1, total: manifest.chunks, cached: false });
+    }
+    bytes = join(pieces);
+    if (manifest.bytes && bytes.length !== manifest.bytes) throw new Error('the library downloaded incompletely; try again');
+    await cachePut('core', CACHE_KEY, { version: manifest.version, bytes: bytes.slice().buffer });
   }
 
-  const { doc, getDoc } = fb.firestore;
-  const pieces = [];
-  for (let i = 0; i < manifest.chunks; i++) {
-    const snap = await getDoc(doc(fb.db, 'library', `chunk-${i}`));
-    if (!snap.exists()) throw new Error(`the library is incomplete in the cloud (piece ${i + 1} of ${manifest.chunks} is missing)`);
-    pieces.push(snap.data().data.toUint8Array());
-    onProgress({ done: i + 1, total: manifest.chunks, cached: false });
-  }
-
-  const bytes = new Uint8Array(pieces.reduce((n, p) => n + p.length, 0));
-  let at = 0;
-  for (const piece of pieces) {
-    bytes.set(piece, at);
-    at += piece.length;
-  }
-  if (manifest.bytes && bytes.length !== manifest.bytes) {
-    throw new Error('the library downloaded incompletely; try again');
-  }
-  await writeCache({ version: manifest.version, bytes });
-  return { bytes, manifest, cached: false };
+  const { questions, packedAt, builtAt } = await decodeLibrary(bytes);
+  return { questions, packedAt, builtAt, cached: Boolean(cached?.version === manifest.version), bytes: bytes.length };
 }
 
-// The questions themselves, with every image pointed at a URL made from the downloaded bytes.
-export async function loadCloudQuestions(options) {
-  const result = await fetchBundle(options);
-  if (!result) return null;
-  const { questions, images, packedAt, builtAt } = decodeBundle(result.bytes);
-  const linked = attachImages(questions, images, bytes => URL.createObjectURL(new Blob([bytes], { type: 'image/webp' })));
-  return { questions: linked, packedAt, builtAt, cached: result.cached, bytes: result.bytes.length };
+// A picture, as a URL the page can show: from this device if it has been seen before, otherwise fetched
+// now and kept. Each is asked for once however many times it is drawn.
+const pictureUrls = new Map();
+
+export function pictureUrl(id) {
+  if (!pictureUrls.has(id)) {
+    const loading = (async () => {
+      let bytes = await cacheGet('images', id);
+      if (!bytes) {
+        if (!fb) throw new Error('not signed in');
+        const snap = await fb.firestore.getDoc(pictureDoc(id));
+        if (!snap.exists()) throw new Error('this picture is missing from the shared library');
+        bytes = snap.data().data.toUint8Array().slice().buffer;
+        await cachePut('images', id, bytes);
+      }
+      return URL.createObjectURL(new Blob([bytes], { type: 'image/webp' }));
+    })();
+    // A failed fetch is not remembered, so it is tried again the next time the picture is drawn.
+    loading.catch(() => pictureUrls.delete(id));
+    pictureUrls.set(id, loading);
+  }
+  return pictureUrls.get(id);
 }
 
 // ---------- replacing it ----------
 
-// Splits the bundle across documents and writes them, newest manifest last so a half-finished upload
-// never looks like the current library.
-// Reads the bundle's own header for the version and question count, then puts it up.
-export async function publishLibrary(bytes, { onProgress } = {}) {
-  const { questions, packedAt } = decodeBundle(bytes);
-  return uploadBundle(bytes, { questions: questions.length, packedAt, onProgress });
-}
-
-async function uploadBundle(bytes, { questions, packedAt, onProgress = () => {} } = {}) {
+// Uploads a packed library. Only pictures not already up there are sent, so publishing again after adding
+// an export sends just the new ones. The manifest is written last, so a half-finished upload is never
+// mistaken for the library, and pictures the new library no longer uses are removed afterwards.
+//
+// library: the packed questions (library.bin). ids: every picture id they use. readPicture(id): its bytes.
+export async function publishLibrary({ library, ids, packedAt, questions, readPicture, onProgress = () => {} }) {
   const { doc, setDoc, deleteDoc, Bytes } = fb.firestore;
-  const chunks = Math.ceil(bytes.length / CHUNK_BYTES);
   const previous = await readManifest().catch(() => null);
+  const already = new Set(listOf(previous?.images));
+  const wanted = [...ids];
+  const toSend = wanted.filter(id => !already.has(id));
 
-  for (let i = 0; i < chunks; i++) {
-    const piece = bytes.subarray(i * CHUNK_BYTES, Math.min(bytes.length, (i + 1) * CHUNK_BYTES));
-    await setDoc(doc(fb.db, 'library', `chunk-${i}`), { data: Bytes.fromUint8Array(piece) });
-    onProgress({ done: i + 1, total: chunks });
-  }
-
-  await setDoc(doc(fb.db, 'library', MANIFEST), {
-    version: packedAt, packedAt, questions, bytes: bytes.length, chunks, updatedAt: new Date().toISOString(),
+  let sent = 0;
+  onProgress({ phase: 'pictures', done: 0, total: toSend.length });
+  await eachAtOnce(toSend, UPLOADS_AT_ONCE, async id => {
+    await setDoc(pictureDoc(id), { data: Bytes.fromUint8Array(await readPicture(id)) });
+    onProgress({ phase: 'pictures', done: ++sent, total: toSend.length });
   });
 
-  // A smaller library than last time leaves pieces behind that nothing points at any more.
-  for (let i = chunks; i < (previous?.chunks ?? 0); i++) {
-    await deleteDoc(doc(fb.db, 'library', `chunk-${i}`)).catch(() => {});
+  const chunks = Math.ceil(library.length / CHUNK_BYTES);
+  for (let i = 0; i < chunks; i++) {
+    const piece = library.subarray(i * CHUNK_BYTES, Math.min(library.length, (i + 1) * CHUNK_BYTES));
+    await setDoc(doc(fb.db, 'library', `chunk-${i}`), { data: Bytes.fromUint8Array(piece) });
+    onProgress({ phase: 'questions', done: i + 1, total: chunks });
   }
-  return { chunks, bytes: bytes.length, questions };
+
+  // The list of pictures is kept in the manifest itself, about 21 characters each, which is what lets a
+  // later upload skip the ones already there. A document's 1 MiB limit leaves room for some 45,000.
+  await setDoc(doc(fb.db, 'library', MANIFEST), {
+    version: packedAt, packedAt, questions, bytes: library.length, chunks,
+    pictures: wanted.length, images: wanted.join(','), updatedAt: new Date().toISOString(),
+  });
+
+  // What the new library no longer needs: pieces past its end, and pictures no question uses any more.
+  for (let i = chunks; i < (previous?.chunks ?? 0); i++) await deleteDoc(doc(fb.db, 'library', `chunk-${i}`)).catch(() => {});
+  const keep = new Set(wanted);
+  const unused = [...already].filter(id => !keep.has(id));
+  await eachAtOnce(unused, UPLOADS_AT_ONCE, id => deleteDoc(pictureDoc(id)).catch(() => {}));
+
+  return { questions, pictures: wanted.length, sent: toSend.length, removed: unused.length, bytes: library.length };
+}
+
+async function eachAtOnce(items, limit, work) {
+  let next = 0;
+  const lanes = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) await work(items[next++]);
+  });
+  await Promise.all(lanes);
+}
+
+function join(pieces) {
+  const out = new Uint8Array(pieces.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const piece of pieces) {
+    out.set(piece, at);
+    at += piece.length;
+  }
+  return out;
 }
 
 // ---------- this device's copy ----------
 
 function openDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE);
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      // Version 1 kept the whole library, pictures and all, in one record; it is replaced, not converted.
+      if (db.objectStoreNames.contains('bundle')) db.deleteObjectStore('bundle');
+      for (const store of ['core', 'images']) if (!db.objectStoreNames.contains(store)) db.createObjectStore(store);
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-async function readCache() {
+async function cacheGet(store, key) {
   try {
     const db = await openDb();
     const value = await new Promise((resolve, reject) => {
-      const request = db.transaction(STORE, 'readonly').objectStore(STORE).get(CACHE_KEY);
+      const request = db.transaction(store, 'readonly').objectStore(store).get(key);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
     db.close();
-    return value ? { version: value.version, bytes: new Uint8Array(value.bytes) } : null;
+    return value ?? null;
   } catch {
-    return null;   // private browsing, or storage turned off: download it again instead
+    return null;   // private browsing, or storage turned off: fetch it again instead
   }
 }
 
-async function writeCache({ version, bytes }) {
+async function cachePut(store, key, value) {
   try {
     const db = await openDb();
     await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put({ version, bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) }, CACHE_KEY);
+      const tx = db.transaction(store, 'readwrite');
+      tx.objectStore(store).put(value, key);
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
     });
     db.close();
   } catch {
     // Not being able to keep a copy only costs a download next time.
-  }
-}
-
-export async function forgetCachedLibrary() {
-  try {
-    const db = await openDb();
-    await new Promise(resolve => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).delete(CACHE_KEY);
-      tx.oncomplete = resolve;
-      tx.onerror = resolve;
-    });
-    db.close();
-  } catch {
-    // nothing cached
   }
 }

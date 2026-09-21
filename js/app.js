@@ -13,7 +13,8 @@ import { mountCalculator } from './calc.js';
 import {
   initSync, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState,
 } from './sync.js';
-import { libraryAccess, loadCloudQuestions, publishLibrary } from './library-cloud.js';
+import { libraryAccess, loadCloudQuestions, pictureUrl, publishLibrary } from './library-cloud.js';
+import { decodeLibrary, pictureIds } from './library-bundle.js';
 
 const APP_NAME = 'Test Prep';
 const view = document.getElementById('view');
@@ -206,10 +207,46 @@ function snippet(q) {
 }
 
 // Questions built from exports keep math, graphs and tables as images (see scripts/build-questions.js).
+// A question from the shared library names its picture by id instead, and the picture is fetched when it is
+// first drawn (see showPictures); its width and height hold its place meanwhile, so nothing jumps.
 function imgHtml(image, alt) {
-  if (!image?.src) return '';
-  return `<img class="qimg" src="${esc(image.src)}" alt="${esc(alt)}" width="${image.width}" height="${image.height}" style="--w:${Number(image.width) || 0}px" loading="lazy">`;
+  if (!image?.src && !image?.id) return '';
+  const source = image.src ? `src="${esc(image.src)}" loading="lazy"` : `data-picture="${esc(image.id)}"`;
+  return `<img class="qimg" ${source} alt="${esc(alt)}" width="${image.width}" height="${image.height}" style="--w:${Number(image.width) || 0}px">`;
 }
+
+// Fills in shared-library pictures wherever they are drawn — a question, a review, a finished test — and
+// only as each comes near the screen. A finished test lists every question, answer and worked solution in
+// folded sections; fetching all of those at once would spend hundreds of the free plan's reads on pictures
+// nobody unfolds. A folded section takes no space on screen, so its pictures wait until it is opened.
+const PICTURE = 'img[data-picture]:not([src])';
+
+function loadPicture(img) {
+  pictureUrl(img.dataset.picture)
+    .then(url => { img.src = url; })
+    .catch(() => {
+      img.alt = `${img.alt} (this picture could not load; check your connection and reload to try again)`;
+      img.classList.add('qimg-missing');
+    });
+}
+
+const nearScreen = 'IntersectionObserver' in window
+  ? new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      nearScreen.unobserve(entry.target);
+      loadPicture(entry.target);
+    }
+  }, { rootMargin: '600px 0px' })
+  : null;
+
+function showPictures(root) {
+  const pictures = root.matches?.(PICTURE) ? [root] : root.querySelectorAll?.(PICTURE) ?? [];
+  for (const img of pictures) nearScreen ? nearScreen.observe(img) : loadPicture(img);
+}
+new MutationObserver(changes => {
+  for (const change of changes) for (const node of change.addedNodes) if (node.nodeType === 1) showPictures(node);
+}).observe(document.body, { childList: true, subtree: true });
 
 // A typed-in answer drawn as math in the export can't be checked automatically; the student compares
 // their answer with the image and marks it. Placement and timed tests only use gradable questions.
@@ -1886,7 +1923,8 @@ function sharedLibraryCard() {
     loading: `<p class="hint">Downloading the shared library${s.progress ? ` — piece ${s.progress.done} of ${s.progress.total}` : ''}…</p>`,
     empty: '<p class="hint">You’re invited, but no library has been uploaded yet.</p>',
     ready: `<p class="muted">${plural(s.count, 'question')} from the shared library${packed ? `, packed ${packed}` : ''}.
-      ${s.cached ? 'Already saved on this device, so it loads instantly and works offline.' : `Downloaded ${(s.bytes / 1048576).toFixed(1)} MB and saved on this device.`}</p>`,
+      ${s.cached ? 'The questions are already saved on this device.' : `Downloaded ${(s.bytes / 1048576).toFixed(1)} MB of questions and saved them on this device.`}
+      Pictures download the first time a question shows one, and are kept after that.</p>`,
     error: `<p class="warn">${esc(s.message || 'The shared library could not be loaded.')}</p>`,
   }[s.status] ?? '';
 
@@ -1903,13 +1941,24 @@ async function uploadSharedLibrary(button) {
   button.disabled = true;
   button.textContent = 'Reading the packed library…';
   try {
-    const res = await fetch('data/pack/bundle.bin', { cache: 'no-store' });
+    const res = await fetch('data/pack/library.bin', { cache: 'no-store' });
     if (!res.ok) throw new Error('No packed library found. Run npm run build and then npm run pack, then reload this page.');
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    const result = await publishLibrary(bytes, {
-      onProgress: p => { button.textContent = `Uploading — piece ${p.done} of ${p.total}…`; },
+    const library = new Uint8Array(await res.arrayBuffer());
+    const { questions, packedAt } = await decodeLibrary(library);
+    const readPicture = async id => {
+      const picture = await fetch(`data/pack/images/${id}.webp`, { cache: 'no-store' });
+      if (!picture.ok) throw new Error(`Picture ${id} is missing from data/pack. Run npm run pack again, then reload this page.`);
+      return new Uint8Array(await picture.arrayBuffer());
+    };
+    const result = await publishLibrary({
+      library, ids: pictureIds(questions), packedAt, questions: questions.length, readPicture,
+      onProgress: p => {
+        button.textContent = p.phase === 'pictures'
+          ? `Uploading pictures — ${p.done} of ${p.total}… keep this tab open`
+          : `Uploading questions — piece ${p.done} of ${p.total}…`;
+      },
     });
-    toast(`Shared library updated: ${plural(result.questions, 'question')}`);
+    toast(`Shared library updated: ${plural(result.questions, 'question')}, ${plural(result.sent, 'new picture')}`);
     cloudLibraryFor = null;            // load it back down, so this page shows what testers will get
     syncCloudLibrary(syncState());
   } catch (err) {

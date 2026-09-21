@@ -46,8 +46,9 @@ contain math, graphs or tables. `exports/` and `data/` are gitignored, so no off
 
 Because none of that is committed, the published site has only the questions written for this app. To give your
 own account and a few invited testers the full library there, run `npm run pack` and use **Upload this device's
-library** on the Library page. It splits the packed bundle across a handful of Cloud Firestore documents, which
-anyone listed in `admins/` or `testers/` may read; see `firestore.rules` for how to invite someone. A downloaded
-library is kept in the browser, so it costs one read to check the version afterwards and works offline.
+library** on the Library page. The questions go up as about a megabyte of compressed text, and each picture as its
+own Cloud Firestore document, named by its contents so an unchanged picture is never uploaded twice. Anyone listed in
+`admins/` or `testers/` may read them; see `firestore.rules` for how to invite someone. A tester downloads the
+questions once and each picture the first time a question shows it, and keeps both in the browser.
 
 Score ranges are estimates from a Rasch (IRT) model and each test's scale, not official scores.
