@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseExport } from '../js/cb-layout.js';
+import { letterFromRationale, numbersFromRationale, parseExport } from '../js/cb-layout.js';
 import { readPage } from '../js/cb-pdf.js';
 import { findSkill } from '../js/taxonomy.js';
 
@@ -161,6 +161,91 @@ test('questions that fail validation are skipped with a reason', () => {
   assert.match(warnings[1], /aaaa0002: unrecognized skill "Poetry"/);
 });
 
+// ---- answers given only in the rationale ----
+
+test('a typed-in answer is read from the rationale when there is no Correct Answer line', () => {
+  const [q] = parseExport([page([
+    ...top('5a6b7c8d', { test: 'Math', domain: 'Algebra', skill: 'Linear equations in one|variable', difficulty: 'Easy' }),
+    words(18, 642, 'What is the value of x if 5x = 13?'),
+    words(18, 603, 'Rationale', 8),
+    words(18, 588, 'The correct answer is 2.6. Dividing both sides by 5 gives x = 2.6.'),
+    words(18, 574, 'Note that 2.6 and 13/5 are examples of ways to enter a correct answer.'),
+  ])]).questions;
+  assert.deepEqual(q.answer, ['2.6', '13/5']);
+  assert.equal(q.prompt.stem, 'What is the value of x if 5x = 13?');
+});
+
+test('a decimal answer keeps its decimals, and a thousands comma is not a list', () => {
+  // "2.6." once read as 2, and "3,540" as the two answers 3 and 540.
+  assert.deepEqual(numbersFromRationale('The correct answer is 2.6. Dividing both sides by 5 gives this.'), ['2.6']);
+  assert.deepEqual(numbersFromRationale('The correct answer is 3,540. According to the table, this is the estimate.'), ['3540']);
+  assert.deepEqual(numbersFromRationale('The correct answer is 3500. It follows that'), ['3500']);
+  assert.deepEqual(numbersFromRationale('The correct answer is −4. Subtracting gives'), ['-4']);
+});
+
+test('every answer is kept when more than one is right', () => {
+  assert.deepEqual(numbersFromRationale('The correct answer is either 0 or 3. Factoring gives'), ['0', '3']);
+  assert.deepEqual(numbersFromRationale('The correct answer is either 7, 8, or 13. Each of these'), ['7', '8', '13']);
+  assert.deepEqual(numbersFromRationale('Note that 7/6, 1.166, and 1.167 are examples of ways to enter a correct answer.'),
+    ['7/6', '1.166', '1.167']);
+});
+
+test('an answer drawn as math is taken from the forms the rationale lists', () => {
+  assert.deepEqual(numbersFromRationale('The correct answer is . One method is to add. Note that 3/2 and 1.5 are examples of ways to enter a correct answer.'),
+    ['3/2', '1.5']);
+});
+
+test('a rationale that disagrees with itself, or gives no answer, is refused rather than guessed', () => {
+  assert.throws(() => numbersFromRationale('The correct answer is 4. Note that 5 and 10/2 are examples of ways to enter a correct answer.'),
+    /gives the answer as 4 but lists 5, 10\/2/);
+  assert.throws(() => numbersFromRationale('The correct answer is . Adding both sides gives the value.'), /does not give the answer as text/);
+});
+
+test('a multiple-choice answer is read from "Choice B is correct", and never trusted if also called incorrect', () => {
+  assert.equal(letterFromRationale('Choice B is correct. Since p represents the wage'), 'B');
+  assert.equal(letterFromRationale('Choice C is the best answer. The sentence emphasizes'), 'C');
+  assert.throws(() => letterFromRationale('Choice B is correct. Choices A and B are incorrect.'), /both correct and incorrect/);
+  assert.throws(() => letterFromRationale('The graph shows a line.'), /does not name the answer/);
+});
+
+// ---- answer choices drawn as pictures ----
+
+const MATH_META = { test: 'Math', domain: 'Algebra', skill: 'Linear functions', difficulty: 'Easy' };
+const GRAPH_LETTERS = [['A', 540], ['B', 440], ['C', 340], ['D', 240]];
+
+test('graphs drawn above their letters each stay with their own letter', () => {
+  // Each graph ends 8pt above its letter's line, as College Board lays out some graph choices. Reading
+  // them as hanging below the letter handed every graph to the choice above it.
+  const graphs = GRAPH_LETTERS.map(([, y]) => ({ x0: 60, y0: y + 17, x1: 200, y1: y + 80 }));
+  const { questions, warnings } = parseExport([page([
+    ...top('9a8b7c6d', MATH_META),
+    words(18, 642, 'Which graph has a positive slope?'),
+    words(18, 630, 'Answer', 8),
+    ...GRAPH_LETTERS.map(([letter, y]) => words(18, y, `${letter}.`)),
+    words(18, 210, 'Correct Answer: B', 8),
+    words(18, 190, 'Rationale', 8),
+    words(18, 175, 'Choice B is correct.'),
+  ], graphs)]);
+  assert.deepEqual(warnings, []);
+  const [q] = questions;
+  q.choices.forEach((choice, k) => {
+    const [span] = choice.spans;
+    assert.ok(choice.needsImage, `${choice.letter} is a picture`);
+    assert.ok(span.top >= graphs[k].y1 && span.bottom <= graphs[k].y0, `${choice.letter} holds its own graph`);
+    for (const other of graphs.filter((_, i) => i !== k)) {
+      assert.ok(other.y0 >= span.top || other.y1 <= span.bottom, `${choice.letter} holds no other graph`);
+    }
+  });
+});
+
+test('math rising above a choice\'s line belongs to that choice, not the one above it', () => {
+  // A fraction on choice B's line reaches 6pt above the line's text.
+  const [q] = parseExport([readingPage({ boxes: [{ x0: 60, y0: 535, x1: 90, y1: 552 }] })]).questions;
+  assert.equal(q.choices[0].needsImage, false, 'choice A is still plain text');
+  assert.equal(q.choices[1].needsImage, true, 'choice B holds the drawing');
+  assert.ok(q.choices[1].spans[0].top >= 552);
+});
+
 test('a PDF that is not an export produces a clear warning', () => {
   const { questions, warnings } = parseExport([page([words(18, 700, 'Weekly newsletter')])], 'news.pdf');
   assert.equal(questions.length, 0);
@@ -170,6 +255,12 @@ test('a PDF that is not an export produces a clear warning', () => {
 // ---- real exports, if any are present locally (exports/ is never committed) ----
 
 const samplesDir = fileURLToPath(new URL('../exports/', import.meta.url));
+
+// Questions College Board's own export gets wrong in a way no reader could put right faithfully. Each is
+// skipped with a warning; guessing would risk showing a student a wrong answer choice.
+const KNOWN_DEFECTS = {
+  e3bbf2bf: 'the export leaves out choice D’s letter and sets its text where a continuation of C would go',
+};
 const samples = existsSync(samplesDir) ? readdirSync(samplesDir).filter(f => f.toLowerCase().endsWith('.pdf')) : [];
 
 test('parses the local exports cleanly', { skip: samples.length ? false : 'no PDFs in exports/' }, async t => {
@@ -180,7 +271,8 @@ test('parses the local exports cleanly', { skip: samples.length ? false : 'no PD
     const pages = [];
     for (let n = 1; n <= doc.numPages; n++) pages.push(await readPage(await doc.getPage(n), pdfjs.OPS));
     const { questions, warnings } = parseExport(pages, file);
-    assert.deepEqual(warnings, [], `${file} produced warnings`);
+    const known = Object.keys(KNOWN_DEFECTS);
+    assert.deepEqual(warnings.filter(w => !known.some(id => w.includes(`question ${id}:`))), [], `${file} produced warnings`);
     assert.ok(questions.length > 0, `${file} has no questions`);
     assert.equal(new Set(questions.map(q => q.cbId)).size, questions.length, `${file} has duplicate IDs`);
 
@@ -191,6 +283,15 @@ test('parses the local exports cleanly', { skip: samples.length ? false : 'no PD
       if (q.choices) {
         assert.deepEqual(q.choices.map(c => c.letter), ['A', 'B', 'C', 'D'], `${q.cbId}: choices`);
         assert.ok(['A', 'B', 'C', 'D'].includes(q.answer), `${q.cbId}: answer`);
+        // No drawing may be cut in two by the line between one choice and the next: that is how a graph
+        // or a fraction ends up shown under the wrong letter.
+        for (let k = 0; k + 1 < q.choices.length; k++) {
+          const edge = q.choices[k + 1].spans[0];
+          const view = pages[edge.page].view;
+          const cut = pages[edge.page].boxes.find(b => b.y1 - b.y0 < (view[3] - view[1]) * 0.8
+            && b.x1 > edge.left + 2 && b.y0 < edge.top - 1 && b.y1 > edge.top + 1);
+          assert.ok(!cut, `${q.cbId}: a drawing is split between choices ${q.choices[k].letter} and ${q.choices[k + 1].letter}`);
+        }
       } else if (q.answer === null) {
         tally.selfChecked++;
         assert.ok(q.answerRegion.spans.length, `${q.cbId}: answer image`);
@@ -201,9 +302,16 @@ test('parses the local exports cleanly', { skip: samples.length ? false : 'no PD
         assert.ok(region.spans.length, `${q.cbId}: region has no area`);
         tally[region.needsImage ? 'image' : 'text']++;
         for (const p of region.paragraphs || []) {
-          // Missing math leaves a word followed by a spaced-out punctuation mark ("with ."). The exports
-          // do sometimes space punctuation after a number ("radius 2 ?"), so digits are allowed.
-          assert.doesNotMatch(p, /[^\d\s]\s[,.;:?!]|\s{2}|\br t\b/, `${q.cbId}: text looks incomplete: "${p}"`);
+          // Missing math leaves a word followed by a spaced-out punctuation mark ("the value of ."). Several
+          // things look like that and are not gaps, and each was checked across 3,700 real questions:
+          //   - a number or a one-letter variable before it ("radius 2 ?", "the value of x ?"): the math is
+          //     there, the export just spaces italic variables and numbers apart;
+          //   - a mark after the sentence has already ended ("arrogant! .", "“therefore.” ."): a stray
+          //     full stop in College Board's own text;
+          //   - the ellipsis of a shortened quotation ("does not pinpoint ... what causes").
+          const gap = /(?<=[^\d\s.!?”’"])(?<!(?:^|\s)[A-Za-z])\s(?:[,;:?!]|\.(?!\.))/;
+          assert.doesNotMatch(p, gap, `${q.cbId}: text looks incomplete: "${p}"`);
+          assert.doesNotMatch(p, /\s{2}|\br t\b/, `${q.cbId}: text is spaced wrongly: "${p}"`);
         }
       }
     }

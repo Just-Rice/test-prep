@@ -16,7 +16,7 @@ import { parseExport } from '../js/cb-layout.js';
 import { parseBooklet } from '../js/act-layout.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const FORMAT = 4;           // bump to rebuild every export after changing parsing or rendering
+const FORMAT = 5;           // bump to rebuild every export after changing parsing or rendering
 const RENDER_SCALE = 2.4;   // canvas pixels per PDF point
 const DISPLAY_SCALE = 1.3;  // CSS pixels per PDF point, so the export's 9pt text shows at about 12px
 const PADDING = 4;

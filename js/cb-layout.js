@@ -20,6 +20,8 @@ const MISSING_CONTENT_GAP = 6;   // a wider gap inside a line means something dr
 const INDENT_LIMIT = 30;         // lines starting this far in usually follow drawn math
 const PARAGRAPH_GAP = 20;        // lines in a paragraph are about 14.5pt apart; paragraphs about 26pt
 const PAD = 3;
+const GRAPH_AREA = 2000;         // square points of drawing that make a graph, not a stray mark
+const STRAY_AREA = 500;          // less than this is a sliver of a neighbouring drawing, not a picture
 
 export function parseExport(pages, sourceName = 'export') {
   const lines = pages.flatMap((page, index) => buildLines(page, index));
@@ -91,10 +93,13 @@ function parseQuestion(ctx) {
   const questionIdx = find(1, t => t === 'Question');
   if (questionIdx < 0) throw new Error('no "Question" section');
   const correctIdx = find(questionIdx + 1, t => /^Correct Answer:/.test(t));
-  if (correctIdx < 0) throw new Error('no "Correct Answer" line');
+  const rationaleIdx = find(Math.max(questionIdx, correctIdx) + 1, t => t === 'Rationale');
+  // Some questions are exported with no "Correct Answer" line at all and state the answer only in the
+  // rationale. The rationale's heading then marks where the question ends.
+  const endIdx = correctIdx >= 0 ? correctIdx : rationaleIdx;
+  if (endIdx < 0) throw new Error('no "Correct Answer" line or rationale');
   const answerIdx = find(questionIdx + 1, t => t === 'Answer');
-  const hasChoices = answerIdx >= 0 && answerIdx < correctIdx;
-  const rationaleIdx = find(correctIdx + 1, t => t === 'Rationale');
+  const hasChoices = answerIdx >= 0 && answerIdx < endIdx;
 
   const meta = readMetadata(segment.slice(1, questionIdx));
   const section = SECTION_BY_TEST[meta.Test];
@@ -106,9 +111,9 @@ function parseQuestion(ctx) {
 
   const below = line => ({ page: line.page, y: line.y - PAD });
   const above = line => ({ page: line.page, y: line.top + PAD });
-  const correctLine = segment[correctIdx];
+  const endLine = segment[endIdx];
 
-  const prompt = makeRegion(ctx, below(segment[questionIdx]), above(segment[hasChoices ? answerIdx : correctIdx]), left);
+  const prompt = makeRegion(ctx, below(segment[questionIdx]), above(segment[hasChoices ? answerIdx : endIdx]), left);
   if (prompt.empty) throw new Error('the question text is empty');
   if (!prompt.needsImage) {
     const ps = prompt.paragraphs;
@@ -122,31 +127,53 @@ function parseQuestion(ctx) {
     const starts = [];
     for (const letter of LETTERS) {
       const i = find((starts[starts.length - 1] ?? answerIdx) + 1, t => t === `${letter}.` || t.startsWith(`${letter}. `));
-      if (i < 0 || i > correctIdx) throw new Error(`answer choice ${letter} not found`);
+      if (i < 0 || i > endIdx) throw new Error(`answer choice ${letter} not found`);
       starts.push(i);
     }
+    const labels = starts.map(i => segment[i]);
+    const heading = segment[answerIdx];
+    // Graph choices come in two layouts. Usually each graph sits on its letter's line and hangs down from
+    // it. Sometimes each graph is drawn above its letter instead, and then the choice is everything from
+    // the line above down to its own letter. That layout shows as a drawing between the "Answer" heading
+    // and choice A, and nothing drawn after choice D; reading it the usual way hands each graph to the
+    // choice above it.
+    const graphsAbove = labels.every(l => l.tokens.length === 1)
+      && drawnBetween(ctx, below(heading), above(labels[0]), left) > GRAPH_AREA
+      && drawnBetween(ctx, below(labels[labels.length - 1]), above(endLine), left) < STRAY_AREA;
+    // Otherwise each choice starts where its content reaches up to, not at its letter's line: see choiceTop.
+    const tops = graphsAbove
+      ? [heading, ...labels.slice(0, -1)].map(below)
+      : labels.map((line, k) => choiceTop(pages, line, k ? labels[k - 1] : heading));
+    const lastEnd = graphsAbove ? below(labels[labels.length - 1]) : above(endLine);
     choices = starts.map((i, k) => {
       const line = segment[i];
-      const end = above(segment[starts[k + 1] ?? correctIdx]);
-      const region = makeRegion(ctx, above(line), end, line.tokens[0].xEnd + 1.5);
+      const end = k + 1 < starts.length ? tops[k + 1] : lastEnd;
+      const region = makeRegion(ctx, tops[k], end, line.tokens[0].xEnd + 1.5);
       if (region.empty) throw new Error(`answer choice ${LETTERS[k]} is empty`);
       if (!region.needsImage) region.text = region.paragraphs.join(' ');
       return { letter: LETTERS[k], ...region };
     });
   }
 
-  const answerLabel = correctLine.tokens.findIndex(t => t.text === 'Answer:');
-  const answerText = correctLine.tokens.slice(answerLabel + 1).map(t => t.text).join(' ').trim();
-  const answerRegion = makeRegion(ctx, above(correctLine), { page: correctLine.page, y: correctLine.y - 4 },
-    correctLine.tokens[answerLabel].xEnd + 1);
   let answer;
-  if (hasChoices) {
-    if (!LETTERS.includes(answerText)) throw new Error(`unexpected correct answer "${answerText}"`);
-    answer = answerText;
-  } else if (answerRegion.needsImage || !answerText) {
-    answer = null; // drawn as math: the student compares against the image instead
+  let answerRegion = null;
+  if (correctIdx >= 0) {
+    const correctLine = segment[correctIdx];
+    const answerLabel = correctLine.tokens.findIndex(t => t.text === 'Answer:');
+    const answerText = correctLine.tokens.slice(answerLabel + 1).map(t => t.text).join(' ').trim();
+    answerRegion = makeRegion(ctx, above(correctLine), { page: correctLine.page, y: correctLine.y - 4 },
+      correctLine.tokens[answerLabel].xEnd + 1);
+    if (hasChoices) {
+      if (!LETTERS.includes(answerText)) throw new Error(`unexpected correct answer "${answerText}"`);
+      answer = answerText;
+    } else if (answerRegion.needsImage || !answerText) {
+      answer = null; // drawn as math: the student compares against the image instead
+    } else {
+      answer = answerText.split(/,\s+|\s+or\s+/).map(plainNumber).filter(Boolean);
+    }
   } else {
-    answer = answerText.split(/,\s+|\s+or\s+/).map(a => a.trim()).filter(Boolean);
+    const said = segment.slice(rationaleIdx + 1).map(l => l.text).join(' ').replace(/\s+/g, ' ').trim();
+    answer = hasChoices ? letterFromRationale(said) : numbersFromRationale(said);
   }
 
   let rationale = null;
@@ -164,8 +191,76 @@ function parseQuestion(ctx) {
     difficulty: meta.Difficulty, prompt, choices, answer,
     answerRegion: answer === null ? answerRegion : null,
     rationale,
-    original: { spans: spansBetween(pages, below(segment[questionIdx]), above(correctLine), left) },
+    original: { spans: spansBetween(pages, below(segment[questionIdx]), above(endLine), left) },
   };
+}
+
+// ---------- answers stated only in the rationale ----------
+//
+// A few exports have no "Correct Answer" line, and the answer is only said in the rationale. That is
+// read strictly, in College Board's own fixed wording, and cross-checked, because an answer read wrong
+// would mark every student who got the question right as wrong. Anything that does not fit the wording
+// exactly is refused rather than guessed at.
+
+// "3,540" is one number, three thousand five hundred and forty, not a list of 3 and 540: a comma with
+// three digits straight after it groups thousands, and a comma that separates answers always has a space
+// after it ("7, 8, or 13"). Reading 3,540 as a list once turned the right answer into two wrong ones.
+const NUMBER = String.raw`-?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.?\d*|\.\d+)(?:\/\d+)?`;
+const NUMBERS = String.raw`${NUMBER}(?:(?:,\s+|,?\s+or\s+|,?\s+and\s+)${NUMBER})*`;
+// Students type answers without the thousands commas, so they are taken out of the stored answer too.
+export const plainNumber = s => s.trim().replace(/(\d),(?=\d{3}(?!\d))/g, '$1');
+const splitNumbers = list => list.split(/,\s+(?:or\s+|and\s+)?|\s+or\s+|\s+and\s+/).map(plainNumber).filter(Boolean);
+const valueOf = s => {
+  const [top, bottom] = s.split('/');
+  return bottom === undefined ? Number(top) : Number(top) / Number(bottom);
+};
+
+// "Choice B is correct." or "Choice B is the best answer." — and never also "Choice B is incorrect".
+export function letterFromRationale(text) {
+  const named = /^Choice ([A-D]) is (?:correct|the best answer)\b/.exec(text);
+  if (!named) throw new Error('no "Correct Answer" line, and the rationale does not name the answer');
+  const letter = named[1];
+  const wrong = [...text.matchAll(/Choices? ((?:[A-D](?:,\s*|,?\s+and\s+)?)+) (?:is|are) incorrect/g)].flatMap(m => m[1].match(/[A-D]/g));
+  if (wrong.includes(letter)) throw new Error(`the rationale calls choice ${letter} both correct and incorrect`);
+  return letter;
+}
+
+// "The correct answer is 2.6." and/or "Note that 2.6 and 13/5 are examples of ways to enter a correct
+// answer." Several answers can be right ("The correct answer is either 0 or 3."), and every one is kept.
+// When both sentences give numbers they must agree, value for value.
+export function numbersFromRationale(text) {
+  const plain = text.replace(/[−–]/g, '-');
+  // The number is followed by the sentence's own full stop, so "2.6." is read as 2.6 and not as 2.
+  const stated = new RegExp(String.raw`The correct answer is (?:either )?(${NUMBERS})\s*\.(?=\s|$)`).exec(plain);
+  const forms = new RegExp(String.raw`Note that (${NUMBERS}) (?:is an example|are examples) of ways? to enter (?:a|the) correct answer`).exec(plain);
+  const said = stated ? splitNumbers(stated[1]) : [];
+  const listed = forms ? splitNumbers(forms[1]) : [];
+  if (!said.length && !listed.length) throw new Error('no "Correct Answer" line, and the rationale does not give the answer as text');
+  if (said.length && listed.length && !said.every(s => listed.some(l => Math.abs(valueOf(l) - valueOf(s)) < 1e-9))) {
+    throw new Error(`the rationale gives the answer as ${said.join(' or ')} but lists ${listed.join(', ')}`);
+  }
+  return [...new Set([...listed, ...said])];
+}
+
+// Where an answer choice begins. A choice drawn as a picture sits on its letter's baseline and rises from
+// it — a fraction by a few points, a graph by a whole column — so a choice starts at the top of whatever
+// is drawn on its line, not at the top of the letter. Starting at the letter handed each graph to the
+// choice above it: choice A showed B's graph, B showed C's, and D showed nothing.
+//
+// It never reaches past the line above it (the previous choice, or the "Answer" heading for choice A),
+// and a drawing nearly the height of the page is ignored, because that is a fallback for something whose
+// size could not be measured rather than a real picture.
+function choiceTop(pages, line, previous) {
+  const page = pages[line.page];
+  const tallest = (page.view[3] - page.view[1]) * 0.8;
+  // Just under the line above, so that line stays whole, descenders included, in its own region.
+  const ceiling = previous && previous.page === line.page ? previous.y - PAD : page.view[3];
+  let top = line.top;
+  for (const b of page.boxes) {
+    if (b.x1 <= line.tokens[0].xEnd || b.y1 - b.y0 > tallest) continue;
+    if (b.y0 <= line.top && b.y1 > line.y - 4) top = Math.max(top, b.y1);   // it touches the letter's line
+  }
+  return { page: line.page, y: Math.min(top + PAD, ceiling) };
 }
 
 function readMetadata(lines) {
@@ -201,6 +296,23 @@ function spansBetween(pages, start, end, left) {
 }
 
 const overlaps = (b, s) => b.x1 > s.left + 0.5 && b.x0 < s.right - 0.5 && b.y1 > s.bottom + 0.5 && b.y0 < s.top - 0.5;
+
+// How much is drawn between two positions, in square points, for telling one layout from another. A
+// drawing nearly the height of a page is left out: that is the fallback for something whose size could
+// not be measured (see cb-pdf.js), not a real picture.
+function drawnBetween({ pages }, start, end, left) {
+  let area = 0;
+  for (const s of spansBetween(pages, start, end, left)) {
+    const tallest = (pages[s.page].view[3] - pages[s.page].view[1]) * 0.8;
+    for (const b of pages[s.page].boxes) {
+      if (b.y1 - b.y0 > tallest) continue;
+      const h = Math.min(b.y1, s.top) - Math.max(b.y0, s.bottom);
+      const w = Math.min(b.x1, s.right) - Math.max(b.x0, s.left);
+      if (h > 0 && w > 0) area += h * w;
+    }
+  }
+  return area;
+}
 
 function makeRegion({ pages, segment }, start, end, left) {
   const spans = spansBetween(pages, start, end, left);
