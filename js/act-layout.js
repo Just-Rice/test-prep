@@ -71,14 +71,6 @@ export function parseBooklet(pages, sourceName = 'booklet') {
   for (const { section, title } of SECTION_TITLES) {
     const range = findSection(sheets, title);
     if (!range) continue;
-    // Science prints its passage as figures, tables and graphs interleaved with the questions about
-    // them, with no reliable boundary between one passage and the next. Reading those as text
-    // produces questions attached to the wrong data, which is worse than not having them, so the
-    // section is left out until its figures can be cut out as images.
-    if (section === 'SCI') {
-      warnings.push(`${sourceName}: the science test was skipped. Its questions depend on figures and tables that this reader cannot cut out yet.`);
-      continue;
-    }
     if (!keys[section]) {
       warnings.push(`${sourceName}: the ${title.toLowerCase()} has no scoring key, so its questions were skipped.`);
       continue;
@@ -274,7 +266,7 @@ function questionStarts(lines, left) {
 
 function readSection({ sheets, range, section, key, sourceName, warnings }) {
   const questions = [];
-  const passages = section === 'ENG' ? englishPassages(sheets, range) : proseFirstPassages(sheets, range, section);
+  const passages = section === 'ENG' ? englishPassages(sheets, range) : pagePassages(sheets, range, section);
 
   for (let p = range.start; p <= range.end; p++) {
     const sheet = sheets[p];
@@ -323,9 +315,13 @@ function buildQuestion({ sheet, lines, number, entry, section, passage }) {
 
   const letters = lettersFor(number);
   const found = choiceIdx.map(i => choiceStart(lines[i]).letter);
-  const wanted = letters.slice(0, found.length);
+  const wanted = letters.slice(0, CHOICES);
   if (found.join('') !== wanted.join('')) {
-    throw new Error(`answer choices read as ${found.join('')} but should be ${letters.slice(0, 4).join('')}`);
+    // Every question has four choices. Finding fewer means they are not all on this page: a question that
+    // starts at the foot of one page has the rest of its choices on the next, and this reader works a page
+    // and a column at a time. Such a question is left out rather than shown with half its answers.
+    const cause = wanted.join('').startsWith(found.join('')) ? ', so the rest are on the page after this one' : '';
+    throw new Error(`answer choices read as ${found.join('') || 'none'} but should be ${wanted.join('')}${cause}`);
   }
   if (!found.includes(entry.letter)) throw new Error(`the key's answer "${entry.letter}" is not among its choices`);
 
@@ -342,7 +338,9 @@ function buildQuestion({ sheet, lines, number, entry, section, passage }) {
   return {
     number, section, domain: entry.domain, skill: entry.skill, answer: entry.letter,
     stem, choices,
-    passage: passage ? { text: passage.text, underline: underlineFor(passage, number) } : null,
+    passage: passage
+      ? { text: passage.text ?? null, spans: passage.spans ?? null, id: passage.index ?? null, underline: underlineFor(passage, number) }
+      : null,
     // The question exactly as the booklet prints it, kept so a student can check anything the text
     // above lost against the page it came from.
     original: { spans: spansBetween(sheet, lines[0].top + PAD, lines[lines.length - 1].y - PAD, left - 2, right) },
@@ -436,32 +434,52 @@ function englishPassages(sheets, range) {
   }));
 }
 
-// Reading and Science print a passage, then the questions about it on the pages that follow.
-function proseFirstPassages(sheets, range, section) {
+// Reading and Science both print a passage on its own page, then the questions about it on the page that
+// follows. Reading's passages are prose and travel as text. Science's are tables, graphs and diagrams with a
+// little text threaded between them, which no amount of reading the text can reproduce, so a science passage
+// travels as a picture of the page instead — one piece per column, which is also the order it reads in.
+function pagePassages(sheets, range, section) {
   const found = [];
   for (let p = range.start; p <= range.end; p++) {
     const sheet = sheets[p];
     const heading = sheet.lines.find(l => /^Passage\s+[IVX]+/i.test(textOf(l)));
     if (!heading) continue;
-    found.push({
-      start: { page: sheet.page, y: heading.top },
-      rules: [],
-      // The passage runs from its own heading down through both columns. Starting at the heading is
-      // what leaves the test's directions out: they are printed above it on the first passage page.
-      // The previous passage's last question or two often spill onto the foot of a column here, so
-      // each column also stops where its first question begins.
-      text: columnsOf(sheet).flatMap(lines => {
-        const above = lines.filter(l => l.y <= heading.y);
-        const left = above.length ? Math.min(...above.map(l => l.tokens[0].x)) : 0;
-        const question = questionStarts(above, left)[0];
-        return question ? above.slice(0, question.index) : above;
-      })
+    // The passage runs from its own heading down through both columns. Starting at the heading is what
+    // leaves the test's directions out: they are printed above it on the first passage page. The previous
+    // passage's last question or two often spill onto the foot of a column here, so each column also stops
+    // where its own first question begins.
+    const columns = columnsOf(sheet).map(lines => {
+      const under = lines.filter(l => l.y <= heading.y);
+      const left = under.length ? Math.min(...under.map(l => l.tokens[0].x)) : 0;
+      const question = questionStarts(under, left)[0];
+      return question ? { lines: under.slice(0, question.index), floor: under[question.index].top + PAD } : { lines: under, floor: null };
+    });
+    const passage = { start: { page: sheet.page, y: heading.top }, rules: [], index: found.length + 1 };
+    if (section === 'SCI') passage.spans = columnSpans(sheet, heading, columns);
+    else {
+      passage.text = columns.flatMap(c => c.lines)
         .map(l => textOf(l).replace(/^\d{1,3}(?=[A-Z"'“])/, ''))   // line numbers printed in the margin
         .filter(text => text && !/^\d+$/.test(text))
-        .join(' ').replace(/(\w)-\s(\w)/g, '$1$2').replace(/\s+/g, ' ').trim(),
-    });
+        .join(' ').replace(/(\w)-\s(\w)/g, '$1$2').replace(/\s+/g, ' ').trim();
+    }
+    found.push(passage);
   }
   return found;
+}
+
+// A science passage as rectangles to cut out: the left column then the right, each from the heading down to
+// where that column's own content ends — its first spilled question, or the foot of the page.
+function columnSpans(sheet, heading, columns) {
+  const top = heading.top + PAD;
+  const margin = Math.min(...sheet.lines.flatMap(l => l.tokens.map(t => t.x)));
+  const edges = sheet.gutter === null
+    ? [[margin - PAD, sheet.view[2] - 36]]
+    : [[margin - PAD, sheet.gutter - 2], [sheet.gutter - 2, sheet.view[2] - 36]];
+  return edges.map(([left, right], i) => {
+    const column = columns[i];
+    const lowest = column?.lines.length ? Math.min(...column.lines.map(l => l.y)) - PAD : top;
+    return { page: sheet.page, left, right, top, bottom: Math.min(column?.floor ?? lowest, lowest) };
+  }).filter(span => span.top > span.bottom);
 }
 
 function passageFor(passages, page, y) {

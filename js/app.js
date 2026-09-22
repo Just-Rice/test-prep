@@ -539,17 +539,17 @@ document.addEventListener('keydown', e => {
 
 // A passage or figure goes in its own reading column, beside the question on wide screens like the real test.
 function questionHtml(q, st = {}) {
-  let reading = '';
-  let prompt;
-  if (q.promptImage) {
-    prompt = `<div class="prompt-image">${imgHtml(q.promptImage, 'The question, as shown in the official export')}</div>`;
-  } else {
-    const passage = q.passage || st.passageHtml
-      ? `<div class="passage">${st.passageHtml ?? underline(para(q.passage), q.underline)}</div>` : '';
-    const figures = (q.figures || []).map(src => `<img class="figure" src="${esc(src)}" alt="Figure for this question">`).join('');
-    if (passage || figures) reading = `<div class="q-read">${passage}${figures}</div>`;
-    prompt = `<div class="stem">${underline(para(q.stem), q.underline)}</div>`;
-  }
+  // An ACT science passage is tables and diagrams rather than prose, so it comes as a picture of the page.
+  // It is built outside the branch below because those questions can themselves be a picture, and the
+  // passage would be dropped along with the stem.
+  const passagePicture = q.passageImage ? `<div class="passage-image">${imgHtml(q.passageImage, 'The passage, as printed in the booklet')}</div>` : '';
+  const passage = q.passage || st.passageHtml
+    ? `<div class="passage">${st.passageHtml ?? underline(para(q.passage), q.underline)}</div>` : '';
+  const figures = (q.figures || []).map(src => `<img class="figure" src="${esc(src)}" alt="Figure for this question">`).join('');
+  const reading = passagePicture || passage || figures ? `<div class="q-read">${passagePicture}${passage}${figures}</div>` : '';
+  const prompt = q.promptImage
+    ? `<div class="prompt-image">${imgHtml(q.promptImage, 'The question, as shown in the official export')}</div>`
+    : `<div class="stem">${underline(para(q.stem), q.underline)}</div>`;
   let answer;
   if (q.choices) {
     answer = `<ol class="choices">${q.choices.map(c => {

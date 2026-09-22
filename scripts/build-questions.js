@@ -16,7 +16,7 @@ import { parseExport } from '../js/cb-layout.js';
 import { parseBooklet } from '../js/act-layout.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const FORMAT = 5;           // bump to rebuild every export after changing parsing or rendering
+const FORMAT = 6;           // bump to rebuild every export after changing parsing or rendering
 const RENDER_SCALE = 2.4;   // canvas pixels per PDF point
 const DISPLAY_SCALE = 1.3;  // CSS pixels per PDF point, so the export's 9pt text shows at about 12px
 const PADDING = 4;
@@ -87,10 +87,11 @@ async function buildFile(bytes, fileName, imagesDir, kind) {
     const build = kind === 'act' ? buildActQuestion : buildQuestion;
     const { questions: parsed, warnings } = parse(pages, fileName);
     const image = createRenderer(doc, imagesDir);
+    const shared = new Map();   // pictures more than one question uses, such as a science passage
     const questions = [];
     for (const p of parsed) {
       try {
-        questions.push(await build(p, image, fileName));
+        questions.push(await build(p, image, fileName, shared));
       } catch (err) {
         warnings.push(`${fileName}: skipped question ${p.cbId ?? `${p.section} ${p.number}`}: ${err.message}`);
       }
@@ -105,7 +106,7 @@ async function buildFile(bytes, fileName, imagesDir, kind) {
 // the question's own number, which is what the booklet's scoring key indexes it by.
 const slug = name => name.replace(/\.pdf$/i, '').replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 40);
 
-async function buildActQuestion(p, image, fileName) {
+async function buildActQuestion(p, image, fileName, shared) {
   const base = `act-${slug(fileName)}-${p.section.toLowerCase()}-${p.number}`;
   const q = {
     id: base, source: 'act-export', actNumber: p.number,
@@ -116,6 +117,12 @@ async function buildActQuestion(p, image, fileName) {
   };
   if (p.passage?.text) q.passage = p.passage.text;
   if (p.passage?.underline) q.underline = p.passage.underline;
+  // Every question about a science passage shows the same picture of it, so it is cut out once.
+  if (p.passage?.spans) {
+    const name = `act-${slug(fileName)}-${p.section.toLowerCase()}-passage-${p.passage.id}`;
+    if (!shared.has(name)) shared.set(name, await image(p.passage.spans, name));
+    q.passageImage = shared.get(name);
+  }
   if (p.stem.needsImage) q.promptImage = await image(p.stem.spans, `${base}-prompt`);
   else q.stem = p.stem.paragraphs.join('\n\n');
 

@@ -144,6 +144,57 @@ test('a drawing inside a choice makes that choice an image, leaving the others a
   assert.ok(q.choices[1].spans.length);
 });
 
+// ---- science: the passage is tables and diagrams, so it travels as a picture ----
+
+// A passage page: a heading, prose in both columns, and a table drawn between them.
+const sciencePages = () => [
+  page([[{ str: 'SCIENCE TEST', x: 262, y: 702, w: 88, h: 11 }], words(180, 660, 'DIRECTIONS: There are several passages in this test.')]),
+  page([
+    words(42, 542, 'Passage I'),
+    words(42, 522, 'Two groups measured how quickly water drained'),
+    words(42, 508, 'through three soils, shown in Table 1 below.'),
+    words(336, 542, 'Table 2 lists the same soils by grain size, which'),
+    words(336, 528, 'the groups measured with a set of sieves.'),
+  ], [{ x0: 60, y0: 300, x1: 280, y1: 470 }]),
+  page([
+    words(48, 702, '1.'), words(60, 702, 'According to Table 1, which soil drained fastest?'),
+    words(60, 678, 'A.'), words(78, 678, 'Sand'),
+    words(60, 658, 'B.'), words(78, 658, 'Silt'),
+    words(60, 638, 'C.'), words(78, 638, 'Clay'),
+    words(60, 618, 'D.'), words(78, 618, 'They drained at the same rate'),
+    words(48, 560, '2.'), words(60, 560, 'Based on Table 2, the largest grains were in which soil?'),
+    words(60, 536, 'F.'), words(78, 536, 'Sand'),
+    words(60, 516, 'G.'), words(78, 516, 'Silt'),
+    words(60, 496, 'H.'), words(78, 496, 'Clay'),
+    words(60, 476, 'J.'), words(78, 476, 'Cannot be determined'),
+  ]),
+  page([words(250, 400, 'END OF TEST 4')]),
+  keyPage('Science Scoring Key', [[1, 'A', 'IOD'], [2, 'F', 'SIN']]),
+];
+
+test('a science question carries a picture of its passage, not the text of it', () => {
+  const { questions, warnings } = parseBooklet(sciencePages());
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(questions.map(q => q.number), [1, 2]);
+  const [q] = questions;
+  assert.equal(q.section, 'SCI');
+  assert.equal(q.domain, 'Interpretation of Data');
+  assert.equal(q.passage.text, null, 'tables and diagrams are not read as text');
+  assert.ok(q.passage.spans.length >= 1, 'the passage is a picture');
+  for (const span of q.passage.spans) {
+    assert.equal(span.page, 1, 'cut from the passage page');
+    assert.ok(span.top > span.bottom && span.top <= 555, 'starts at the passage heading and runs down the page');
+  }
+  assert.deepEqual(q.stem.paragraphs, ['According to Table 1, which soil drained fastest?']);
+  assert.deepEqual(q.choices.map(c => c.paragraphs.join(' ')), ['Sand', 'Silt', 'Clay', 'They drained at the same rate']);
+});
+
+test('every question about one passage points at the same picture of it', () => {
+  const [first, second] = parseBooklet(sciencePages()).questions;
+  assert.equal(first.passage.id, second.passage.id);
+  assert.deepEqual(first.passage.spans, second.passage.spans);
+});
+
 test('a PDF with no scoring key produces a clear warning rather than questions', () => {
   const { questions, warnings } = parseBooklet([page([words(42, 700, 'Weekly newsletter')])], 'news.pdf');
   assert.equal(questions.length, 0);
@@ -179,8 +230,10 @@ test('parses the local ACT booklets cleanly', { skip: samples.length ? false : '
     for (let n = 1; n <= doc.numPages; n++) pages.push(await readPage(await doc.getPage(n), pdfjs.OPS));
     const { questions, warnings } = parseBooklet(pages, file);
 
-    // The science test is knowingly left out; nothing else may go wrong silently.
-    assert.deepEqual(warnings.filter(w => !/science test was skipped/.test(w)), [], `${file} produced warnings`);
+    // A question that starts at the foot of a page keeps the rest of its choices on the next one, and this
+    // reader works a page and a column at a time, so it is skipped by name rather than half-read. Nothing
+    // else may go wrong silently.
+    assert.deepEqual(warnings.filter(w => !/the rest are on the page after this one/.test(w)), [], `${file} produced warnings`);
     assert.ok(questions.length > 80, `${file} produced only ${questions.length} questions`);
 
     const seen = new Set();
@@ -194,7 +247,12 @@ test('parses the local ACT booklets cleanly', { skip: samples.length ? false : '
       assert.ok(q.choices.some(c => c.letter === q.answer), `${at}: answer ${q.answer} is not a choice`);
       assert.ok(q.original.spans.length, `${at}: no printed region`);
 
-      if (q.section !== 'MATH') assert.ok(q.passage?.text.length > 200, `${at}: passage is missing or too short`);
+      // English and reading passages are prose; a science passage is a picture of its page.
+      if (q.section === 'ENG' || q.section === 'READ') assert.ok(q.passage?.text.length > 200, `${at}: passage is missing or too short`);
+      if (q.section === 'SCI') {
+        assert.ok(q.passage?.spans.length, `${at}: the picture of its passage is missing`);
+        assert.ok(q.passage.spans.every(s => s.top - s.bottom > 40), `${at}: the picture of its passage is a sliver`);
+      }
       if (q.passage?.underline) {
         tally.underlined++;
         assert.ok(q.passage.text.includes(q.passage.underline[0]),
