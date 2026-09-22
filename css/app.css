@@ -1,4 +1,5 @@
-/* SAT Prep — "Study desk": a graphite sidebar, paper-grey desk, and a #2-pencil yellow accent used sparingly
+/* SAT Prep — "Study desk": a paper-grey desk with a sidebar that follows the theme (white by day, graphite by
+   night), and a #2-pencil yellow accent used sparingly
    (active navigation, the daily goal ring, badges and highlights). Semantic green/amber/red are separate. */
 
 :root {
@@ -8,11 +9,14 @@
   --ink: #1A1F25;
   --muted: #636D78;
   --rule: #E0E4E9;
-  --side: #1F242B;
-  --side-ink: #C3CAD2;
-  --side-strong: #FFFFFF;
-  --side-muted: #8B949E;
-  --side-raise: rgb(255 255 255 / 0.07);
+  --side: #FFFFFF;
+  --side-ink: #3A424C;
+  --side-strong: #14181D;
+  --side-muted: #616A75;
+  --side-raise: rgb(20 25 35 / 0.05);
+  --side-on: rgb(20 25 35 / 0.07);
+  --side-track: rgb(20 25 35 / 0.09);
+  --side-edge: #E0E4E9;
   --accent: #F2B01E;
   --accent-ink: #7A5500;
   --accent-soft: #FDF1D3;
@@ -43,6 +47,9 @@
     --side-strong: #FFFFFF;
     --side-muted: #7D8792;
     --side-raise: rgb(255 255 255 / 0.06);
+    --side-on: rgb(255 255 255 / 0.09);
+    --side-track: rgb(255 255 255 / 0.12);
+    --side-edge: transparent;
     --accent: #F5C24A;
     --accent-ink: #F5C24A;
     --accent-soft: #3A3017;
@@ -91,6 +98,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 22px; padding: 22px 14px 16px;
   background: var(--side); color: var(--side-ink);
+  border-right: 1px solid var(--side-edge);
 }
 .side-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .brand { min-width: 0; overflow: hidden; font: 800 20px/1 var(--display); letter-spacing: -0.01em; color: var(--side-strong); text-decoration: none; padding: 4px 10px; white-space: nowrap; }
@@ -102,7 +110,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 .side-nav a:hover { background: var(--side-raise); color: var(--side-strong); }
 .side-nav .icon { width: 19px; height: 19px; color: var(--side-muted); }
 .side-nav a:hover .icon, .side-nav a.on .icon { color: var(--side-strong); }
-.side-nav a.on { background: rgb(255 255 255 / 0.09); color: var(--side-strong); box-shadow: inset 3px 0 0 var(--accent); }
+.side-nav a.on { background: var(--side-on); color: var(--side-strong); box-shadow: inset 3px 0 0 var(--accent); }
 .badge { margin-left: auto; background: var(--accent); color: #1A1F25; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 1; padding: 3px 7px; }
 .badge.live { font-size: 0; width: 9px; height: 9px; padding: 0; flex: none; }
 .streak { margin-top: auto; display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -111,7 +119,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 .streak .label { display: grid; gap: 1px; min-width: 0; flex: 1; white-space: nowrap; }
 .streak strong { color: var(--side-strong); font-weight: 600; font-size: 15px; }
 .streak .label > span { font-size: 13px; color: var(--side-muted); }
-.goal-bar { display: block; height: 4px; margin-top: 5px; border-radius: 999px; background: rgb(255 255 255 / 0.12); overflow: hidden; }
+.goal-bar { display: block; height: 4px; margin-top: 5px; border-radius: 999px; background: var(--side-track); overflow: hidden; }
 .goal-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
 .sync { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; color: var(--side-ink); font-size: 14px; text-decoration: none; white-space: nowrap; }
 .sync:hover, .sync.on { background: var(--side-raise); color: var(--side-strong); }
@@ -147,6 +155,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   .topbar {
     display: flex; align-items: center; gap: 6px; position: sticky; top: 0; z-index: 30;
     height: 56px; padding: 0 8px 0 max(16px, env(safe-area-inset-left)); background: var(--side); color: var(--side-ink);
+    border-bottom: 1px solid var(--side-edge);
   }
   .topbar .brand { font-size: 18px; padding: 0; margin-right: auto; }
   .top-streak { display: flex; align-items: center; gap: 4px; padding: 8px 10px; color: var(--side-muted); font-weight: 700; font-size: 16px; text-decoration: none; font-variant-numeric: tabular-nums; }
@@ -156,7 +165,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   .top-sync { display: grid; place-items: center; width: 40px; height: 40px; }
   .tabs {
     display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-    background: var(--side); padding: 6px max(6px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+    background: var(--side); border-top: 1px solid var(--side-edge); padding: 6px max(6px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
   }
   .tabs a, .tabs button {
     position: relative; display: grid; justify-items: center; gap: 2px; padding: 6px 0 4px; min-height: 52px;
@@ -609,6 +618,7 @@ button.link:hover:not(:disabled) { text-decoration: underline; }
 :root[data-theme="dark"] {
   --bg: #121518; --surface: #1B1F25; --surface-2: #252B32; --ink: #E8EBEE; --muted: #9AA3AD; --rule: #2B3139;
   --side: #0B0D10; --side-ink: #C3CAD2; --side-strong: #FFFFFF; --side-muted: #7D8792; --side-raise: rgb(255 255 255 / 0.06);
+  --side-on: rgb(255 255 255 / 0.09); --side-track: rgb(255 255 255 / 0.12); --side-edge: transparent;
   --good: #5CC28A; --good-soft: #173524; --mid: #E3B04B; --mid-soft: #3A2F14; --low: #EE7C6F; --low-soft: #3D1F1C;
   --mark: #6B5A12; --focus: var(--accent); --pop: 0 16px 40px -12px rgb(0 0 0 / 0.7);
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.45);
@@ -621,7 +631,8 @@ button.link:hover:not(:disabled) { text-decoration: underline; }
 }
 :root[data-theme="light"] {
   --bg: #F4F5F7; --surface: #FFFFFF; --surface-2: #ECEFF3; --ink: #1A1F25; --muted: #636D78; --rule: #E0E4E9;
-  --side: #1F242B; --side-ink: #C3CAD2; --side-strong: #FFFFFF; --side-muted: #8B949E; --side-raise: rgb(255 255 255 / 0.07);
+  --side: #FFFFFF; --side-ink: #3A424C; --side-strong: #14181D; --side-muted: #616A75; --side-raise: rgb(20 25 35 / 0.05);
+  --side-on: rgb(20 25 35 / 0.07); --side-track: rgb(20 25 35 / 0.09); --side-edge: #E0E4E9;
   --good: #2F8A5B; --good-soft: #E2F2E9; --mid: #B37A06; --mid-soft: #FBF0D9; --low: #C4473A; --low-soft: #FBE7E4;
   --mark: #FFE08A; --focus: #1A1F25; --pop: 0 16px 40px -12px rgb(20 25 35 / 0.35);
   --shadow-1: 0 1px 2px rgb(16 24 40 / 0.06), 0 1px 3px rgb(16 24 40 / 0.06);

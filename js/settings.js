@@ -83,7 +83,16 @@ export function saveSettings(settings) {
 export function applySettings(settings) {
   const root = document.documentElement;
   for (const key of KEYS) root.setAttribute(`data-${key}`, settings[key]);
+  matchBrowserBar();
 }
+
+// On a phone the browser's own bar sits directly above the app's top bar, so it takes the same colour and
+// follows the theme with it, including when the device itself switches between light and dark.
+function matchBrowserBar() {
+  const colour = getComputedStyle(document.documentElement).getPropertyValue('--side').trim();
+  if (colour) for (const meta of document.querySelectorAll('meta[name="theme-color"]')) meta.content = colour;
+}
+globalThis.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', matchBrowserBar);
 
 // True when the student, or their device, has asked for less movement.
 export function motionIsReduced(settings) {
