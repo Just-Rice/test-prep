@@ -12,6 +12,8 @@ import { fileURLToPath } from 'node:url';
 import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createCanvas } from '@napi-rs/canvas';
 import { readPage } from '../js/cb-pdf.js';
+import { inkBounds } from '../js/ink.js';
+import { questionFromBooklet, questionFromExport } from '../js/question-builder.js';
 import { parseExport } from '../js/cb-layout.js';
 import { parseBooklet } from '../js/act-layout.js';
 
@@ -84,7 +86,7 @@ async function buildFile(bytes, fileName, imagesDir, kind) {
     const pages = [];
     for (let n = 1; n <= doc.numPages; n++) pages.push(await readPage(await doc.getPage(n), OPS));
     const parse = kind === 'act' ? parseBooklet : parseExport;
-    const build = kind === 'act' ? buildActQuestion : buildQuestion;
+    const build = kind === 'act' ? questionFromBooklet : questionFromExport;
     const { questions: parsed, warnings } = parse(pages, fileName);
     const image = createRenderer(doc, imagesDir);
     const shared = new Map();   // pictures more than one question uses, such as a science passage
@@ -100,67 +102,6 @@ async function buildFile(bytes, fileName, imagesDir, kind) {
   } finally {
     await loading.destroy();
   }
-}
-
-// ACT booklets have no per-question id of their own, so one is made from the booklet's file name and
-// the question's own number, which is what the booklet's scoring key indexes it by.
-const slug = name => name.replace(/\.pdf$/i, '').replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 40);
-
-async function buildActQuestion(p, image, fileName, shared) {
-  const base = `act-${slug(fileName)}-${p.section.toLowerCase()}-${p.number}`;
-  const q = {
-    id: base, source: 'act-export', actNumber: p.number,
-    section: p.section, domain: p.domain, skill: p.skill, answer: p.answer,
-    // ACT does not publish a difficulty for individual questions, and the booklets do not imply one,
-    // so every question sits at the middle of the scale rather than at an invented one.
-    difficulty: 'Medium',
-  };
-  if (p.passage?.text) q.passage = p.passage.text;
-  if (p.passage?.underline) q.underline = p.passage.underline;
-  // Every question about a science passage shows the same picture of it, so it is cut out once.
-  if (p.passage?.spans) {
-    const name = `act-${slug(fileName)}-${p.section.toLowerCase()}-passage-${p.passage.id}`;
-    if (!shared.has(name)) shared.set(name, await image(p.passage.spans, name));
-    q.passageImage = shared.get(name);
-  }
-  if (p.stem.needsImage) q.promptImage = await image(p.stem.spans, `${base}-prompt`);
-  else q.stem = p.stem.paragraphs.join('\n\n');
-
-  q.choices = [];
-  for (const c of p.choices) {
-    q.choices.push(c.needsImage
-      ? { letter: c.letter, image: await image(c.spans, `${base}-choice-${c.letter}`) }
-      : { letter: c.letter, text: c.paragraphs.join(' ') });
-  }
-  q.original = await image(p.original.spans, `${base}-original`);
-  return q;
-}
-
-async function buildQuestion(p, image) {
-  const name = part => `${p.cbId}-${part}`;
-  const q = {
-    id: `cb-${p.cbId}`, cbId: p.cbId, source: 'cb-export', assessment: p.assessment,
-    section: p.section, domain: p.domain, skill: p.skill, difficulty: p.difficulty, answer: p.answer,
-  };
-  if (p.prompt.needsImage) q.promptImage = await image(p.prompt.spans, name('prompt'));
-  else Object.assign(q, { passage: p.prompt.passage, stem: p.prompt.stem });
-
-  q.choices = null;
-  if (p.choices) {
-    q.choices = [];
-    for (const c of p.choices) {
-      q.choices.push(c.needsImage
-        ? { letter: c.letter, image: await image(c.spans, name(`choice-${c.letter}`)) }
-        : { letter: c.letter, text: c.text });
-    }
-  }
-  if (p.answer === null) q.answerImage = await image(p.answerRegion.spans, name('answer'));
-  if (p.rationale) {
-    if (p.rationale.needsImage) q.rationaleImage = await image(p.rationale.spans, name('rationale'));
-    else q.rationale = p.rationale.text;
-  }
-  q.original = await image(p.original.spans, name('original'));
-  return q;
 }
 
 function createRenderer(doc, imagesDir) {
@@ -220,26 +161,6 @@ function createRenderer(doc, imagesDir) {
     const toCss = px => Math.round((px / RENDER_SCALE) * DISPLAY_SCALE);
     return { src: `data/img/${file}`, width: toCss(out.width), height: toCss(out.height) };
   };
-}
-
-// Smallest rectangle containing non-white pixels, or null if the area is blank.
-function inkBounds({ data, width, height }) {
-  const inked = (x, y) => {
-    const i = (y * width + x) * 4;
-    return data[i] < 235 || data[i + 1] < 235 || data[i + 2] < 235;
-  };
-  const rowInked = y => { for (let x = 0; x < width; x++) if (inked(x, y)) return true; return false; };
-  let top = 0;
-  let bottom = height - 1;
-  while (top <= bottom && !rowInked(top)) top++;
-  if (top > bottom) return null;
-  while (!rowInked(bottom)) bottom--;
-  const colInked = x => { for (let y = top; y <= bottom; y++) if (inked(x, y)) return true; return false; };
-  let left = 0;
-  let right = width - 1;
-  while (!colInked(left)) left++;
-  while (!colInked(right)) right--;
-  return { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

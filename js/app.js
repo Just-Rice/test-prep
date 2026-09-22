@@ -19,6 +19,11 @@ import {
   readInviteCode, removeTester, saveInviteCode,
 } from './library-cloud.js';
 import { decodeLibrary, pictureIds } from './library-bundle.js';
+import { importPdf } from './import-pdf.js';
+import {
+  hasPicture as haveImportedPicture, importedPictureUrl, importedQuestions as readImportedQuestions,
+  importsSupported, listImports, removeImport, saveImport,
+} from './imported-library.js';
 
 const APP_NAME = 'Test Prep';
 const view = document.getElementById('view');
@@ -44,6 +49,8 @@ let library = { source: 'demo', files: 0, warnings: [], own: 0, borrowed: false 
 // The questions this device built or ships with, and the shared library downloaded after signing in.
 let baseQuestions = [];
 let cloudQuestions = [];
+let ownQuestions = [];        // questions the student imported from their own PDFs
+let imports = [];             // what those files were
 let cloudLibrary = { status: 'idle', access: null };
 let session = null;     // the active placement, practice or review session
 let test = null;        // the timed practice test, kept separately so browsing other pages doesn't end it
@@ -237,7 +244,8 @@ function imgHtml(image, alt) {
 const PICTURE = 'img[data-picture]:not([src])';
 
 function loadPicture(img) {
-  pictureUrl(img.dataset.picture)
+  const id = img.dataset.picture;
+  (haveImportedPicture(id) ? importedPictureUrl(id) : pictureUrl(id))
     .then(url => { img.src = url; })
     .catch(() => {
       img.alt = `${img.alt} (this picture could not load; check your connection and reload to try again)`;
@@ -304,7 +312,7 @@ const ROUTES = {
   placement: [viewPlacement, 'Placement test'], placed: [viewPlaced, 'Placement results'], practice: [viewPractice, 'Practice'],
   test: [viewTest, 'Practice test'], review: [viewReview, 'Review'], mistakes: [viewMistakes, 'Mistakes'],
   plan: [viewPlan, 'Study plan'], library: [viewLibrary, 'Library'], resources: [viewResources, 'Resources'],
-  settings: [viewSettings, 'Settings'], account: [viewAccount, 'Account'],
+  settings: [viewSettings, 'Settings'], account: [viewAccount, 'Account'], import: [viewImport, 'Your own questions'],
 };
 
 // quiet: this redraw is not a reader's own navigation but the page catching up with something that
@@ -726,12 +734,14 @@ function renderDrill(headerHtml, source, rerender) {
 
 // ---------- start: placement or grade ----------
 
+const importLink = '<a href="#/import">add question PDFs of your own</a>';
+
 function addQuestionsHint() {
   // ACT questions come from ACT's own practice test booklets, which carry a scoring key at the back;
   // without that key a booklet has no answers and no reporting categories, so it cannot be read.
   return exam.source === 'act'
-    ? 'save ACT practice test booklets, with the scoring keys at the back, in the <code>exports/act</code> folder and restart the app'
-    : `save ${exam.long} exports from the College Board Question Bank in the <code>exports</code> folder and restart the app`;
+    ? `${importLink}, or save ACT practice test booklets, with the scoring keys at the back, in the <code>exports/act</code> folder and restart the app`
+    : `${importLink}, or save ${exam.long} exports from the College Board Question Bank in the <code>exports</code> folder and restart the app`;
 }
 
 function viewStart() {
@@ -1895,6 +1905,7 @@ function viewLibrary() {
     ${pageHead('Question library', { eyebrow: exam.long })}
     ${source}
     ${originalsNote}
+    <p class="hint">Have question PDFs of your own? You can ${importLink} — they are read on this device and stay on it.</p>
     ${sharedLibraryCard()}
     ${library.warnings.length ? `<div class="card"><h2>Skipped questions</h2>${library.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}</div>` : ''}
     <div class="card">
@@ -2064,6 +2075,93 @@ async function uploadSharedLibrary(button) {
     button.textContent = label;
     button.disabled = false;
   }
+}
+
+// ---------- questions a student brings themselves ----------
+
+function viewImport() {
+  const files = imports.length ? `
+    <div class="card">
+      <h2>On this device</h2>
+      <ul class="tester-list">${imports.map(file => `
+        <li><span>${esc(file.name)}</span>
+          <span class="hint">${plural(file.questions, 'question')} · ${file.kind === 'act' ? 'ACT booklet' : 'College Board export'} · added ${new Date(file.at).toLocaleDateString()}</span>
+          <button type="button" class="link" data-remove-import="${esc(file.id)}">Remove</button></li>`).join('')}
+      </ul>
+      ${imports.flatMap(f => f.warnings || []).length
+        ? `<h3>Skipped questions</h3>${imports.flatMap(f => f.warnings || []).slice(0, 20).map(w => `<p class="warn">${esc(w)}</p>`).join('')}`
+        : ''}
+    </div>` : '';
+  view.innerHTML = `
+    ${pageHead('Your own questions', { eyebrow: exam.long })}
+    <p class="muted">Practise with question PDFs of your own. They are read here on this device and stay on it:
+      the file is never uploaded, and nothing about it is sent anywhere.</p>
+    <div class="card">
+      <h2>Add a PDF</h2>
+      <p class="hint">Two kinds are understood: a <strong>College Board Question Bank export</strong>, from the
+        SAT Suite Educator Question Bank, and an <strong>ACT practice test booklet</strong> from act.org, which
+        must still have the scoring key at the back — that is where its answers come from.</p>
+      ${importsSupported()
+        ? `<div class="actions"><label class="button primary" for="pdf-file">Choose a PDF…</label></div>
+           <input id="pdf-file" type="file" accept="application/pdf,.pdf" multiple hidden>
+           <p class="hint" id="import-progress" hidden></p>`
+        : '<p class="warn">This browser will not let the app keep questions on the device, so importing is not available here. Private browsing usually does this.</p>'}
+    </div>
+    ${files}
+    <p class="hint">A long export takes a while to read — a thousand-page one, a few minutes — and the app stays
+      on this page while it works.</p>`;
+  on('#pdf-file', 'change', e => addPdfs([...e.target.files], e.currentTarget));
+  on('[data-remove-import]', 'click', async e => {
+    const button = e.currentTarget;
+    if (button.dataset.confirm !== 'yes') {
+      button.dataset.confirm = 'yes';
+      button.textContent = 'Click again to remove';
+      return;
+    }
+    await removeImport(button.dataset.removeImport);
+    toast('Removed');
+    await refreshImports();
+  });
+}
+
+async function addPdfs(files, input) {
+  const say = text => {
+    const line = $('#import-progress');
+    if (!line) return;
+    line.hidden = false;
+    line.textContent = text;
+  };
+  for (const file of files) {
+    try {
+      say(`Reading ${file.name}…`);
+      const result = await importPdf(file, {
+        onProgress: p => say(p.phase === 'reading'
+          ? `Reading ${file.name} — page ${p.done} of ${p.total}…`
+          : `Cutting out the pictures — ${p.done} of ${plural(p.total, 'question')}…`),
+      });
+      if (!result.questions.length) {
+        toast(result.warnings[0] ?? `No questions found in ${file.name}.`);
+        continue;
+      }
+      await saveImport(result);
+      toast(`Added ${plural(result.questions.length, 'question')} from ${file.name}`);
+    } catch (err) {
+      toast(`Could not read ${file.name}: ${err.message}`);
+    }
+  }
+  if (input) input.value = '';   // so the same file can be chosen again
+  await refreshImports();
+}
+
+// Questions imported here join the pool the moment they are read, and are there again on the next visit.
+async function refreshImports() {
+  imports = await listImports();
+  ownQuestions = await readImportedQuestions();
+  applyLibrary();
+  // The import page lists what is already on the device, and reading the device takes a moment, so on a
+  // first load the page is drawn before the answer is in. Draw it again, quietly, once it is.
+  if (currentRoute === 'import') render({ quiet: true });
+  else renderNav(currentRoute);
 }
 
 // ---------- settings ----------
@@ -2353,8 +2451,8 @@ window.addEventListener('hashchange', render);
 // shared library. Demo questions are only ever a stand-in, so a real library retires them.
 function applyLibrary() {
   const byId = new Map();
-  for (const q of [...baseQuestions, ...cloudQuestions]) {
-    if (cloudQuestions.length && q.source === 'demo') continue;
+  for (const q of [...baseQuestions, ...ownQuestions, ...cloudQuestions]) {
+    if ((cloudQuestions.length || ownQuestions.length) && q.source === 'demo') continue;
     if (!byId.has(q.id)) byId.set(q.id, q);
   }
   allQuestions = [...byId.values()];
@@ -2442,6 +2540,9 @@ loadLibrary().then(result => {
   baseQuestions = result.questions;
   applyLibrary();
   render();
+  refreshImports().then(() => {
+    if (ownQuestions.length) refreshForLibrary({ questionsChanged: true });
+  });
   let lastPhase = null;
   initSync({
     exams: EXAM_IDS,
