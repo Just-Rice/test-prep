@@ -20,9 +20,17 @@ export function reviewMistake(mistakes, qid, correct, now = Date.now()) {
   return mistakes;
 }
 
+// For a question whose every miss was taken back (see takeBack in sync-core.js). Like a graduated entry it
+// is kept as a marker, so another device's older copy can't put the question back into review; unlike one,
+// it isn't something the student learned, so nothing lists it. Missing the question again replaces it.
+export function removeMistake(mistakes, qid, now = Date.now()) {
+  mistakes[qid] = { removed: true, updatedAt: now };
+  return mistakes;
+}
+
 export function dueMistakes(mistakes, now = Date.now()) {
   return Object.entries(mistakes)
-    .filter(([, m]) => !m.graduated && m.due <= now)
+    .filter(([, m]) => !m.graduated && !m.removed && m.due <= now)
     .sort((a, b) => a[1].due - b[1].due)
     .map(([qid]) => qid);
 }

@@ -931,7 +931,7 @@ function viewPractice(arg) {
 function viewReview(arg) {
   if (arg === 'go') return reviewSession();
   session = null;
-  const entries = Object.entries(progress.mistakes).filter(([id, m]) => byId.has(id) && !m.graduated).sort((a, b) => a[1].due - b[1].due);
+  const entries = Object.entries(progress.mistakes).filter(([id, m]) => byId.has(id) && !m.graduated && !m.removed).sort((a, b) => a[1].due - b[1].due);
   const due = entries.filter(([, m]) => m.due <= Date.now()).length;
   const reasons = {};
   for (const [, m] of entries) reasons[m.reason || 'Not tagged'] = (reasons[m.reason || 'Not tagged'] || 0) + 1;
@@ -988,7 +988,7 @@ const lastMiss = qid => [...progress.responses].reverse().find(r => r.qid === qi
 
 function mistakeEntries() {
   return Object.entries(progress.mistakes)
-    .filter(([id]) => byId.has(id))
+    .filter(([id, m]) => byId.has(id) && !m.removed)
     .map(([id, m]) => ({ id, m, q: byId.get(id) }))
     .sort((a, b) => (a.m.graduated ? 1 : 0) - (b.m.graduated ? 1 : 0) || (a.m.due ?? 0) - (b.m.due ?? 0));
 }
@@ -1621,7 +1621,7 @@ function railHtml(days) {
   const week = Array.from({ length: 7 }, (_, k) => { const d = new Date(); d.setDate(d.getDate() - (6 - k)); return d; });
   const total = projectedTotal();
   const target = progress.plan.target;
-  const queue = Object.entries(progress.mistakes).filter(([id, m]) => byId.has(id) && !m.graduated).sort((a, b) => a[1].due - b[1].due).slice(0, 3);
+  const queue = Object.entries(progress.mistakes).filter(([id, m]) => byId.has(id) && !m.graduated && !m.removed).sort((a, b) => a[1].due - b[1].due).slice(0, 3);
   const dueLabel = at => (at <= Date.now() ? 'now' : new Date(at).toLocaleDateString(undefined, { weekday: 'short' }));
   const testDay = progress.plan.testDate && new Date(`${progress.plan.testDate}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   return `

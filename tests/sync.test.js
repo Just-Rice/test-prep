@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultProgress } from '../js/store.js';
-import { mergeProgress, periodOf, fromCloud, syncProgress, toCloud } from '../js/sync-core.js';
+import { mergeProgress, periodOf, fromCloud, syncProgress, takeBack, toCloud } from '../js/sync-core.js';
 import { addMistake, dueMistakes, reviewMistake } from '../js/srs.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -76,6 +76,61 @@ test('a reset on one device clears older progress everywhere', () => {
   assert.deepEqual(merged.responses.map(r => r.qid), ['q9']);
   assert.deepEqual(merged.mistakes, {});
   assert.equal(merged.profile.mode, null);
+});
+
+test('an answer taken back stays gone, even from a device that still has it', async () => {
+  const cloud = memoryCloud();
+  const knownA = {};
+  const knownB = {};
+  const mine = answer('q1', T0);
+  const slip = answer('q2', T0 + 1, false);
+  let a = { ...defaultProgress(), responses: [mine, slip] };
+  addMistake(a.mistakes, 'q2', null, T0 + 1);
+  a = await syncProgress(cloud.backend, a, knownA, { full: true });
+  let b = await syncProgress(cloud.backend, defaultProgress(), knownB, { full: true });
+  assert.equal(b.responses.length, 2, 'the other device has the answer too');
+
+  a = await syncProgress(cloud.backend, takeBack(a, [slip], T0 + DAY), knownA);
+  assert.deepEqual(a.responses.map(r => r.qid), ['q1']);
+  assert.deepEqual(dueMistakes(a.mistakes, T0 + 400 * DAY), [], 'the question leaves review');
+
+  // Device B still holds q2 in its own copy and syncs a new answer on top of it.
+  b = await syncProgress(cloud.backend, { ...b, responses: [...b.responses, answer('q3', T0 + 2 * DAY)] }, knownB);
+  assert.deepEqual(b.responses.map(r => r.qid), ['q1', 'q3']);
+  assert.deepEqual(dueMistakes(b.mistakes, T0 + 400 * DAY), []);
+  a = await syncProgress(cloud.backend, a, knownA, { full: true });
+  sameData(a, b);
+  assert.deepEqual(JSON.parse(cloud.docs.get(periodOf(T0))).map(r => r.qid), ['q1', 'q3']);
+});
+
+test('a question stays in review while a wrong answer to it is left', () => {
+  const first = answer('q1', T0, false);
+  const second = answer('q1', T0 + DAY, false);
+  const p = { ...defaultProgress(), responses: [first, second] };
+  addMistake(p.mistakes, 'q1', null, T0);
+  addMistake(p.mistakes, 'q1', null, T0 + DAY);
+  const next = takeBack(p, [second], T0 + 2 * DAY);
+  assert.ok(!next.mistakes.q1.removed);
+  assert.equal(next.mistakes.q1.lapses, 2);
+  assert.equal(p.responses.length, 2, 'the progress passed in is left as it was');
+});
+
+test('missing a question again after taking the miss back puts it back in review', () => {
+  const slip = answer('q1', T0, false);
+  let p = { ...defaultProgress(), responses: [slip] };
+  addMistake(p.mistakes, 'q1', null, T0);
+  const elsewhere = structuredClone(p);   // another device's older copy
+  p = takeBack(p, [slip], T0 + DAY);
+  p.responses.push(answer('q1', T0 + 2 * DAY, false));
+  addMistake(p.mistakes, 'q1', null, T0 + 2 * DAY);
+  const merged = mergeProgress(p, elsewhere);
+  assert.equal(merged.responses.length, 1);
+  assert.deepEqual(dueMistakes(merged.mistakes, T0 + 4 * DAY), ['q1']);
+});
+
+test('progress with nothing taken back is stored exactly as before', () => {
+  const p = { ...defaultProgress(), responses: [answer('q1', T0)] };
+  assert.ok(!JSON.parse(toCloud(p).main).removed);
 });
 
 test('answers are stored in half-month chunks and survive a round trip', () => {

@@ -15,13 +15,14 @@ export function defaultProgress() {
     plan: { testDate: null, target: null, dailyGoal: 20 },
     stamps: { profile: 0, placement: 0, plan: 0 },   // when each setting last changed, for cloud sync
     resetAt: 0,                                       // when progress was last reset (see sync-core.js)
+    removed: [],                                      // answers taken back, so no device brings them back (sync-core.js)
   };
 }
 
 // True for progress nobody has touched yet, which cloud sync doesn't need to store.
 export function isPristine(progress) {
   return !progress.responses?.length && !Object.keys(progress.mistakes || {}).length && !progress.tests?.length
-    && !progress.resetAt && Object.values(progress.stamps || {}).every(time => !time);
+    && !progress.resetAt && !progress.removed?.length && Object.values(progress.stamps || {}).every(time => !time);
 }
 
 export function loadProgress(exam = 'sat') {

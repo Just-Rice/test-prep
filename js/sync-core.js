@@ -4,7 +4,9 @@
 // Every device keeps a full copy of progress in localStorage, and merging is built so devices converge
 // whatever order they sync in: answers and tests are append-only and combine by identity; each mistake-log
 // entry and the profile, placement and plan settings keep whichever copy changed last; and "Reset all
-// progress" records a time, after which anything older is dropped on every device.
+// progress" records a time, after which anything older is dropped on every device. An answer can also be
+// taken back one at a time: its identity goes on a `removed` list that every device merges, so a device still
+// holding the answer drops it instead of pushing it back.
 //
 // Cloud layout, one Firestore document per path:
 //   main       everything except answers, as JSON
@@ -13,10 +15,11 @@
 //              rewrites the current chunk.
 
 import { defaultProgress, isPristine } from './store.js';
+import { removeMistake } from './srs.js';
 
 const SETTINGS = ['profile', 'placement', 'plan'];
 
-const responseKey = r => `${r.qid}|${r.at}|${r.source}`;
+export const responseKey = r => `${r.qid}|${r.at}|${r.source}`;
 const entryTime = m => m.updatedAt ?? m.missedAt ?? 0;
 const byTimeThenKey = (x, y) => x.at - y.at || (responseKey(x) < responseKey(y) ? -1 : 1);
 
@@ -31,9 +34,11 @@ export function mergeProgress(a, b) {
     merged.stamps[key] = Math.max(timeA, timeB);
   }
 
+  const removed = new Set([...(a.removed || []), ...(b.removed || [])]);
+  merged.removed = [...removed].sort();
   const responses = new Map();
   for (const r of [...(a.responses || []), ...(b.responses || [])]) {
-    if (r.at > resetAt) responses.set(responseKey(r), r);
+    if (r.at > resetAt && !removed.has(responseKey(r))) responses.set(responseKey(r), r);
   }
   merged.responses = [...responses.values()].sort(byTimeThenKey);
 
@@ -51,6 +56,21 @@ export function mergeProgress(a, b) {
   return merged;
 }
 
+// Takes answers back, as if they had never been given: they leave the history (and so the streak, the skill
+// estimates and the score), and a question leaves review once no wrong answer to it is left. Returns new
+// progress; sync then carries the removal to every device.
+export function takeBack(progress, answers, now = Date.now()) {
+  const keys = new Set(answers.map(responseKey));
+  const next = structuredClone(progress);
+  next.removed = [...new Set([...(progress.removed || []), ...keys])].sort();
+  next.responses = progress.responses.filter(r => !keys.has(responseKey(r)));
+  for (const qid of new Set(answers.filter(r => !r.correct).map(r => r.qid))) {
+    const stillMissed = next.responses.some(r => r.qid === qid && !r.correct);
+    if (next.mistakes[qid] && !stillMissed) removeMistake(next.mistakes, qid, now);
+  }
+  return next;
+}
+
 export function periodOf(at) {
   const d = new Date(at);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${d.getUTCDate() <= 15 ? 1 : 2}`;
@@ -61,6 +81,8 @@ export function toCloud(progress) {
   const main = JSON.stringify({
     profile: progress.profile, placement: progress.placement, plan: progress.plan,
     stamps: progress.stamps, resetAt: progress.resetAt || 0, mistakes, tests: progress.tests,
+    // Only written once something has been taken back, so everyone else's document stays exactly as it was.
+    ...(progress.removed?.length ? { removed: progress.removed } : {}),
   });
   const groups = {};
   for (const r of [...progress.responses].sort(byTimeThenKey)) (groups[periodOf(r.at)] ||= []).push(r);
@@ -100,9 +122,12 @@ export async function syncProgress(backend, local, known, { full = false } = {})
   const result = await backend.transact(async tx => {
     const draft = toCloud(local);
     const remote = new Map(snapshot);
-    for (const [path, json] of [['main', draft.main], ...Object.entries(draft.chunks)]) {
-      if (json !== snapshot.get(path)) remote.set(path, await tx.get(path));
-    }
+    const changed = [['main', draft.main], ...Object.entries(draft.chunks)].filter(([path, json]) => json !== snapshot.get(path));
+    // Whenever anything is written, main is read afresh with it: it holds the reset time and the answers taken
+    // back, which decide what the answer chunks may contain. Merging against a stale copy would write an answer
+    // another device had just taken back straight back into its chunk.
+    if (changed.length && !changed.some(([path]) => path === 'main')) changed.push(['main']);
+    for (const [path] of changed) remote.set(path, await tx.get(path));
     const remoteChunks = Object.fromEntries([...remote].filter(([path, json]) => path !== 'main' && json != null));
     const merged = mergeProgress(local, fromCloud(remote.get('main'), remoteChunks));
     // A test nobody has used on any device stays out of the cloud entirely.
