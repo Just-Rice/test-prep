@@ -37,11 +37,15 @@ let appCheckStarted = false;
 async function registerAppCheck(firebaseApp) {
   if (appCheckStarted || !RECAPTCHA_SITE_KEY) return;
   appCheckStarted = true;
-  // Classic reCAPTCHA v3, not reCAPTCHA Enterprise. With Enterprise, Firebase's own token exchange failed
-  // with FAILED_PRECONDITION although every condition it names was met; v3 is checked by a different route.
-  const { initializeAppCheck, ReCaptchaV3Provider } = await import(`${SDK}/firebase-app-check.js`);
+  // reCAPTCHA Enterprise, the provider App Check has registered for this app. Firebase's own token exchange
+  // has refused it with FAILED_PRECONDITION although every condition it names is met (reported to Firebase
+  // support). Classic reCAPTCHA v3 was tried as a way round and Firebase no longer lets a v3 key be added.
+  // Until that is resolved, App Check is set to monitor rather than enforce for AI Logic, so requests are
+  // answered either way; the token is still sent, so the App Check page shows the moment it starts passing.
+  // Firebase will enforce App Check for AI Logic permanently from 2 November 2026.
+  const { initializeAppCheck, ReCaptchaEnterpriseProvider } = await import(`${SDK}/firebase-app-check.js`);
   initializeAppCheck(firebaseApp, {
-    provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+    provider: new ReCaptchaEnterpriseProvider(RECAPTCHA_SITE_KEY),
     isTokenAutoRefreshEnabled: true,
   });
 }
