@@ -13,6 +13,7 @@ import { getDocument, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createCanvas } from '@napi-rs/canvas';
 import { readPage } from '../js/cb-pdf.js';
 import { inkBounds } from '../js/ink.js';
+import { picturesOf } from '../js/library-bundle.js';
 import { questionFromBooklet, questionFromExport } from '../js/question-builder.js';
 import { parseExport } from '../js/cb-layout.js';
 import { parseBooklet } from '../js/act-layout.js';
@@ -25,7 +26,7 @@ const PADDING = 4;
 const SPAN_GAP = 6;         // pixels between the pieces of a part that crosses a page break
 const PAGE_CACHE = 3;
 
-const imagesOf = q => [q.promptImage, ...(q.choices || []).map(c => c.image), q.answerImage, q.rationaleImage, q.original].filter(Boolean);
+const imagesOf = picturesOf;   // the one list of where a question keeps a picture, in js/library-bundle.js
 const fileOf = image => image.src.split('/').pop();
 
 export async function buildQuestions({ exportsDir = join(ROOT, 'exports'), dataDir = join(ROOT, 'data'), log = console.log } = {}) {

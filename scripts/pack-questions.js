@@ -19,7 +19,7 @@ import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
-import { encodeLibrary } from '../js/library-bundle.js';
+import { encodeLibrary, PICTURE_KEYS } from '../js/library-bundle.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SCALE = 0.7;      // of the already-rendered crop
@@ -69,7 +69,7 @@ export async function packQuestions({ dataDir = join(ROOT, 'data'), outDir = joi
   for (const q of built.questions) {
     // Drop the archive crop; keep everything the student actually needs to answer and learn from.
     const { original, ...rest } = q;
-    for (const key of ['promptImage', 'answerImage', 'rationaleImage']) if (rest[key]) rest[key] = await pack(rest[key]);
+    for (const key of PICTURE_KEYS) if (rest[key]) rest[key] = await pack(rest[key]);   // `original` was dropped above
     if (rest.choices) rest.choices = await Promise.all(rest.choices.map(async c => (c?.image ? { ...c, image: await pack(c.image) } : c)));
     questions.push(rest);
   }

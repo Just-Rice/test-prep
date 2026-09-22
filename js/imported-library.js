@@ -4,6 +4,8 @@
 // show, named by a hash of their contents so two files that share a picture store it once. Nothing here is
 // ever uploaded, and removing a file takes its questions and any pictures nothing else uses with it.
 
+import { picturesOf as allPicturesOf } from './library-bundle.js';
+
 const DB_NAME = 'satprep-imports';
 const DB_VERSION = 1;
 const FILES = 'files';
@@ -106,7 +108,4 @@ export async function importedPictureUrl(id) {
   return urls.get(id);
 }
 
-function picturesOf(q) {
-  return [q.promptImage, q.answerImage, q.rationaleImage, q.passageImage, q.original, ...(q.choices || []).map(c => c?.image)]
-    .filter(picture => picture?.id);
-}
+const picturesOf = q => allPicturesOf(q).filter(picture => picture.id);

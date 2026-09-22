@@ -16,9 +16,13 @@
 
 const VERSION = 2;
 
-// Every place a question keeps a picture.
+// Every field a question keeps a picture in. This is the one list: the build script prunes pictures no
+// question names, and the packer only renames the ones it knows about, so a field missing from here loses
+// its pictures on the next build and is served as a path to a file nobody has. Add a new one here.
+export const PICTURE_KEYS = ['promptImage', 'answerImage', 'rationaleImage', 'passageImage', 'original'];
+
 export function picturesOf(q) {
-  return [q.promptImage, q.answerImage, q.rationaleImage, q.original, ...(q.choices || []).map(c => c?.image)].filter(Boolean);
+  return [...PICTURE_KEYS.map(key => q[key]), ...(q.choices || []).map(c => c?.image)].filter(Boolean);
 }
 
 // The id of every picture a set of questions uses.
