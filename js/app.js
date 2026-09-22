@@ -10,6 +10,7 @@ import { explainConfigured, explainQuestion, hintFor } from './explain.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
 import { ORIGINAL_QUESTIONS } from './questions/index.js';
 import { mountCalculator } from './calc.js';
+import { currentStreak, dayKey, longestStreak } from './streak.js';
 import {
   initSync, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState,
 } from './sync.js';
@@ -69,7 +70,6 @@ function underline(html, parts) {
 }
 const $ = sel => view.querySelector(sel);
 const on = (sel, event, fn) => view.querySelectorAll(sel).forEach(el => el.addEventListener(event, fn));
-const dayKey = t => new Date(t).toLocaleDateString('en-CA');
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const sectionName = id => sectionOf(exam, id)?.name ?? id;
 const sectionShort = id => sectionOf(exam, id)?.short ?? id;
@@ -154,14 +154,20 @@ function answeredToday() {
   return allResponses().filter(r => dayKey(r.at) === today).length;
 }
 
-function streakDays() {
-  const days = new Set(allResponses().map(r => dayKey(r.at)));
-  const d = new Date();
-  if (!days.has(dayKey(d))) d.setDate(d.getDate() - 1);
-  let streak = 0;
-  while (days.has(dayKey(d))) { streak++; d.setDate(d.getDate() - 1); }
-  return streak;
+const streakDays = () => currentStreak(studyDays());
+
+// The streak and today's count depend on the date, so the page catches up when the day changes: left open
+// overnight it would otherwise go on showing yesterday's streak until something else redrew it.
+let shownDay = dayKey(Date.now());
+function catchUpWithTheDate() {
+  const today = dayKey(Date.now());
+  if (today === shownDay) return;
+  shownDay = today;
+  if (!session && ['home', 'scores', 'plan'].includes(currentRoute)) render({ quiet: true });
+  else renderNav(currentRoute);
 }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) catchUpWithTheDate(); });
+setInterval(catchUpWithTheDate, 60 * 1000);
 
 function daysUntilTest() {
   if (!progress.plan.testDate) return null;
@@ -1456,18 +1462,7 @@ function weakestSkills(n) {
 
 const studyDays = () => new Set(allResponses().map(r => dayKey(r.at)));
 
-function bestStreak() {
-  let best = 0;
-  let run = 0;
-  let previous = null;
-  for (const day of [...studyDays()].sort()) {
-    const time = new Date(`${day}T12:00`).getTime();
-    run = previous != null && Math.round((time - previous) / DAY_MS) === 1 ? run + 1 : 1;
-    best = Math.max(best, run);
-    previous = time;
-  }
-  return best;
-}
+const bestStreak = () => longestStreak(studyDays());
 
 function practiceSkill(section, skill) {
   session = { kind: 'practice', section, skill, done: 0, correct: 0, q: null };
