@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EXAMS, EXAM_IDS, examOfQuestion, scoredSections, skillsOf, totalScore } from '../js/exams.js';
+import { EXAMS, EXAM_IDS, NATIONAL_MERIT, examOfQuestion, examsOfQuestion, scoredSections, selectionIndex, skillsOf, totalScore } from '../js/exams.js';
 import { buildModule, nextPracticeQuestion } from '../js/adaptive.js';
 import { projectSectionScore } from '../js/irt.js';
 import { defaultProgress } from '../js/store.js';
@@ -32,6 +32,8 @@ test('exported questions are sorted into the right test', () => {
   assert.equal(examOfQuestion({ assessment: 'PSAT 8/9' }), 'psat89');
   assert.equal(examOfQuestion({ source: 'demo' }), 'sat');
   assert.equal(examOfQuestion({ source: 'act-export' }), 'act');
+  assert.deepEqual(examsOfQuestion({ assessment: 'PSAT 8/9' }), ['psat89']);
+  assert.deepEqual(examsOfQuestion({ assessment: 'SAT', assessments: ['SAT', 'PSAT/NMSQT & PSAT 10'] }), ['sat', 'psat']);
 });
 
 test('scores land on each test’s own scale, and the ACT Composite is an average', () => {
@@ -58,4 +60,13 @@ test('ACT practice and modules draw on ACT skills', () => {
   const module = buildModule(pool, 'MATH', null, new Set(), 20, EXAMS.act);
   assert.equal(module.length, 20);
   assert.equal(new Set(module.map(x => x.id)).size, 20);
+});
+
+test('the National Merit Selection Index weights Reading and Writing twice', () => {
+  const score = mid => ({ low: mid - 30, mid, high: mid + 30 });
+  assert.deepEqual(selectionIndex({ RW: score(700), MATH: score(680) }), { low: 199, mid: 208, high: 217 });
+  assert.equal(selectionIndex({ RW: score(160), MATH: score(160) }).mid, 48, 'lowest possible');
+  assert.equal(selectionIndex({ RW: score(760), MATH: score(760) }).mid, 228, 'highest possible');
+  assert.equal(selectionIndex({ RW: score(700), MATH: null }), null);
+  for (const c of NATIONAL_MERIT.commended) assert.ok(c.index >= 48 && c.index <= 228);
 });

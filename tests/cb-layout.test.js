@@ -260,6 +260,10 @@ const samplesDir = fileURLToPath(new URL('../exports/', import.meta.url));
 // skipped with a warning; guessing would risk showing a student a wrong answer choice.
 const KNOWN_DEFECTS = {
   e3bbf2bf: 'the export leaves out choice D’s letter and sets its text where a continuation of C would go',
+  // The same Code Talkers question, filed in both PSAT banks, with the same missing D as e3bbf2bf.
+  '1a97fb49': 'the export leaves out choice D’s letter and sets its text where a continuation of C would go',
+  '7ffce84a': 'the export leaves out choice D’s letter and sets its text where a continuation of C would go',
+  fb17d540: 'the export numbers the choices 1–4 instead of lettering them, and lays its heading table out differently',
 };
 const samples = existsSync(samplesDir) ? readdirSync(samplesDir).filter(f => f.toLowerCase().endsWith('.pdf')) : [];
 

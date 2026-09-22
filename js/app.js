@@ -3,7 +3,7 @@ import { DIFFICULTY_B, estimateAbility, pCorrect, projectSectionScore } from './
 import {
   buildModule, isCorrect, nextPlacementQuestion, nextPracticeQuestion, PLACEMENT, routeFor, sectionAbility, skillAbilities,
 } from './adaptive.js';
-import { EXAMS, EXAM_IDS, examOfQuestion, scoredSections, sectionOf, skillsOf, totalScore } from './exams.js';
+import { EXAMS, EXAM_IDS, NATIONAL_MERIT, examsOfQuestion, scoredSections, sectionOf, selectionIndex, skillsOf, totalScore } from './exams.js';
 import { addMistake, dueMistakes, reviewMistake } from './srs.js';
 import { applySettings, CHOICES, loadSettings, saveSettings } from './settings.js';
 import { explainConfigured, explainQuestion, hintFor } from './explain.js';
@@ -129,9 +129,9 @@ const invitedToLibrary = () => cloudLibrary.access === 'admin' || cloudLibrary.a
 const includesWritten = () => (settings.questions === 'auto' ? !invitedToLibrary() : settings.questions === 'on');
 
 function choosePool() {
-  const own = allQuestions.filter(q => examOfQuestion(q) === examId);
+  const own = allQuestions.filter(q => examsOfQuestion(q).includes(examId));
   const borrow = !own.length && exam.source === 'cb';
-  const candidates = borrow ? allQuestions.filter(q => examOfQuestion(q) === 'sat') : own;
+  const candidates = borrow ? allQuestions.filter(q => examsOfQuestion(q).includes('sat')) : own;
   // "Official only" leaves out the questions written for this app. A test with no official questions
   // yet keeps them anyway: switching it off there would leave nothing to practise at all, which helps
   // nobody, and the Library page says that is what happened.
@@ -1686,6 +1686,7 @@ function viewScores() {
       const estimate = sectionEstimate(s.id);
       return `<div class="kpi"><span class="eyebrow">${s.name}${s.optional ? ' · optional' : ''}</span>${estimate ? `<strong>${estimate.mid}</strong><span class="muted">likely ${range(estimate)}</span>` : '<span class="muted">Not enough answers yet</span>'}</div>`;
     }).join('')}</div>
+    ${exam.id === 'psat' ? nationalMeritHtml() : ''}
     <div class="skill-lists">${exam.sections.map(sec => {
       const skills = skillAbilities(progress, sec.id, exam).filter(s => s.answered)
         .map(s => ({ ...s, p: pCorrect(s.theta, DIFFICULTY_B.Medium) })).sort((a, b) => a.p - b.p);
@@ -1698,6 +1699,27 @@ function viewScores() {
     <p class="hint">Estimates come from your answers and each question's difficulty. They aren't official ${exam.maker} scores.</p>`;
   on('[data-skill]', 'click', e => practiceSkill(e.currentTarget.dataset.section, e.currentTarget.dataset.skill));
   bindTrend(history);
+}
+
+// Where the estimate puts the student for National Merit, which only the PSAT/NMSQT feeds into.
+function nationalMeritHtml() {
+  const index = selectionIndex({ RW: sectionEstimate('RW'), MATH: sectionEstimate('MATH') });
+  const { commended, semifinalist } = NATIONAL_MERIT;
+  const recent = commended.at(-1);
+  const lows = commended.map(c => c.index);
+  const standing = !index ? ''
+    : index.mid >= recent.index ? `<span class="pill good">At or above the class of ${recent.year} Commended cutoff</span>`
+    : `<span class="pill">${plural(recent.index - index.mid, 'point')} below the class of ${recent.year} Commended cutoff</span>`;
+  return `<section class="card merit">
+      <header class="card-head"><h2>National Merit Selection Index</h2>${standing}</header>
+      ${index ? `<p class="merit-index"><strong>${index.mid}</strong> <span class="muted">likely ${index.low}–${index.high}, out of 228</span></p>`
+        : '<p class="muted">Needs an estimate for both Reading and Writing and Math first.</p>'}
+      <p>National Merit ranks students by this index, not the total: twice the Reading and Writing score plus the Math
+        score, divided by ten. Commended status has needed ${Math.min(...lows)}–${Math.max(...lows)} in recent years
+        (${recent.index} for the class of ${recent.year}), and Semifinalist cutoffs depend on the state, from
+        ${semifinalist.low} to ${semifinalist.high} for the class of ${semifinalist.year}.</p>
+      <p class="hint">Only the PSAT/NMSQT taken in 11th grade counts; the PSAT 10 does not. Cutoffs change every year.</p>
+    </section>`;
 }
 
 // The estimate and likely range on the test's real scale, with the target marked.

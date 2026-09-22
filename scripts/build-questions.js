@@ -42,6 +42,7 @@ export async function buildQuestions({ exportsDir = join(ROOT, 'exports'), dataD
   ];
   const files = sources.map(s => s.file);
   const questions = new Map();
+  let shared = 0;
   const warnings = [];
   const caches = new Set();
 
@@ -66,8 +67,17 @@ export async function buildQuestions({ exportsDir = join(ROOT, 'exports'), dataD
       await writeFile(cachePath, JSON.stringify(result));
     }
     warnings.push(...result.warnings);
-    for (const q of result.questions) if (!questions.has(q.id)) questions.set(q.id, q);
+    // A question exported from two banks (the SAT's and a PSAT's, say) is one question in both tests: it is kept
+    // once, listing every bank it came from. Keeping only the first would take it away from the other test.
+    for (const q of result.questions) {
+      const seen = questions.get(q.id);
+      if (!seen) { questions.set(q.id, q); continue; }
+      const banks = new Set([...(seen.assessments ?? [seen.assessment]), q.assessment]);
+      if (banks.size > (seen.assessments?.length ?? 1)) { questions.set(q.id, { ...seen, assessments: [...banks] }); shared++; }
+    }
   }
+
+  if (shared) log(`${shared} question${shared === 1 ? ' is' : 's are'} in more than one test's bank, and counted in each.`);
 
   // Remove cached results and images that no current export produces.
   const used = new Set([...questions.values()].flatMap(imagesOf).map(fileOf));

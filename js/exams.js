@@ -73,6 +73,22 @@ export const EXAMS = {
 
 export const EXAM_IDS = Object.keys(EXAMS);
 
+// The National Merit Scholarship Program screens PSAT/NMSQT takers by Selection Index, not total score: on the
+// digital test it is (2 × Reading and Writing + Math) ÷ 10, from 48 to 228, so Reading and Writing counts twice.
+// Cutoffs are set each year and Semifinalist ones differ by state; these are the published figures as collected
+// by Compass Education Group (compassprep.com/national-merit-semifinalist-cutoffs), checked September 2026.
+export const NATIONAL_MERIT = {
+  commended: [{ year: 2024, index: 207 }, { year: 2025, index: 208 }, { year: 2026, index: 210 }, { year: 2027, index: 208 }],
+  semifinalist: { year: 2027, low: 208, high: 223 },
+};
+
+export function selectionIndex(bySection) {
+  const { RW, MATH } = bySection;
+  if (!RW || !MATH) return null;
+  const index = key => Math.round((2 * RW[key] + MATH[key]) / 10);
+  return { low: index('low'), mid: index('mid'), high: index('high') };
+}
+
 export const sectionOf = (exam, id) => exam.sections.find(s => s.id === id);
 export const scoredSections = exam => exam.sections.filter(s => !s.optional);
 
@@ -84,15 +100,26 @@ export function skillsForGradeOf(exam, section, grade) {
   return skillsOf(exam, section).filter(s => s.minGrade <= grade);
 }
 
+const examOfAssessment = name => {
+  const assessment = String(name || 'SAT').toUpperCase();
+  if (assessment.includes('8/9')) return 'psat89';
+  if (assessment.includes('PSAT')) return 'psat';
+  return 'sat';
+};
+
 // Which test a question belongs to. College Board exports name the assessment on every question; ACT questions
 // come from ACT's own practice tests.
 export function examOfQuestion(q) {
   if (q.exam && EXAMS[q.exam]) return q.exam;
   if (q.source === 'act-export') return 'act';
-  const assessment = String(q.assessment || 'SAT').toUpperCase();
-  if (assessment.includes('8/9')) return 'psat89';
-  if (assessment.includes('PSAT')) return 'psat';
-  return 'sat';
+  return examOfAssessment(q.assessment);
+}
+
+// Every test a question belongs to. The Question Bank keeps one bank per test, and the same question can sit in
+// more than one; the build script then lists each bank it was exported from in `assessments`.
+export function examsOfQuestion(q) {
+  if (!q.assessments?.length) return [examOfQuestion(q)];
+  return [...new Set(q.assessments.map(examOfAssessment))];
 }
 
 // The total or Composite from section estimates ({ low, mid, high } per section id), or null until every

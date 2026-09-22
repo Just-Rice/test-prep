@@ -126,7 +126,8 @@ does not name?
 - **Classic reCAPTCHA v3.** Firebase checks a v3 key by a different route, so it should have side-stepped the
   Enterprise exchange. A v3 key was registered for `just-rice.github.io` and `localhost`, but App Check will no
   longer accept one: under App Check → Apps → this web app → reCAPTCHA, the secret key field is disabled and
-  the panel says "reCAPTCHA is deprecated, please use reCAPTCHA Enterprise instead". The key is unused.
+  the panel says "reCAPTCHA is deprecated, please use reCAPTCHA Enterprise instead". The key was never used,
+  and was deleted on 22 September 2026; only the Enterprise key the app uses remains.
 - **Not enforcing App Check for AI Logic.** Done, in App Check → APIs → Firebase AI Logic → Set up →
   Unenforced. Gemini now answers. The console warns that **from 2 November 2026 App Check enforcement will be
   required for Firebase AI Logic and cannot be turned off**, so this buys about six weeks.
