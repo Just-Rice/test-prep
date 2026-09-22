@@ -14,10 +14,11 @@ export const FIREBASE_CONFIG = {
 // Firebase now enforces it for AI Logic, so without a key here Gemini answers nothing: the request is refused
 // with "Firebase App Check token is invalid".
 //
-// To fill this in: Google Cloud console -> Security -> reCAPTCHA, enable the reCAPTCHA Enterprise API, create
-// a *Website* key with "Use checkbox challenge" left UNCHECKED (App Check needs a score-based key), and list
-// the domain just-rice.github.io. Paste the key below. Like the config above it is not a secret.
+// This is a classic reCAPTCHA v3 key, from google.com/recaptcha/admin: "Score based (v3)", with the domains
+// just-rice.github.io and localhost. Firebase holds its secret half: App Check -> Apps -> this web app ->
+// reCAPTCHA v3. An Enterprise key was tried first and Firebase's own token exchange refused it with
+// FAILED_PRECONDITION although every condition it names was met. Like the config above, this is not a secret.
 //
 // Set to null to leave App Check unregistered, in which case the app says so plainly rather than failing
 // with a network error.
-export const RECAPTCHA_SITE_KEY = '6Leb1cQtAAAAANgYPyrZPKf18MYlbdnShKt68nk1';
+export const RECAPTCHA_SITE_KEY = '6LdzY8gtAAAAAEcXDKY8Aa3ne7jRB8mCm4-83xGY';

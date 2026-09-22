@@ -37,9 +37,11 @@ let appCheckStarted = false;
 async function registerAppCheck(firebaseApp) {
   if (appCheckStarted || !RECAPTCHA_SITE_KEY) return;
   appCheckStarted = true;
-  const { initializeAppCheck, ReCaptchaEnterpriseProvider } = await import(`${SDK}/firebase-app-check.js`);
+  // Classic reCAPTCHA v3, not reCAPTCHA Enterprise. With Enterprise, Firebase's own token exchange failed
+  // with FAILED_PRECONDITION although every condition it names was met; v3 is checked by a different route.
+  const { initializeAppCheck, ReCaptchaV3Provider } = await import(`${SDK}/firebase-app-check.js`);
   initializeAppCheck(firebaseApp, {
-    provider: new ReCaptchaEnterpriseProvider(RECAPTCHA_SITE_KEY),
+    provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
     isTokenAutoRefreshEnabled: true,
   });
 }
