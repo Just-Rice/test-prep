@@ -8,7 +8,7 @@
 
 const KEY = 'satprep.settings.v1';
 
-export const DEFAULTS = { theme: 'system', accent: 'pencil', textsize: 'medium', contrast: 'normal', motion: 'full', explain: 'on', originals: 'on', level: 'adaptive' };
+export const DEFAULTS = { theme: 'system', accent: 'pencil', textsize: 'medium', contrast: 'normal', motion: 'full', explain: 'on', questions: 'auto', level: 'adaptive' };
 
 // [value, label, description] for each setting, in the order the Settings page shows them.
 export const CHOICES = {
@@ -43,9 +43,13 @@ export const CHOICES = {
     ['on', 'On', 'Ask for a hint before answering, or an explanation afterwards.'],
     ['off', 'Off', 'No AI help, and nothing about your questions leaves this device.'],
   ],
-  // The 400 questions written for this app, as opposed to the official ones from College Board and ACT.
-  // Leaving them out never leaves a test with nothing: see choosePool in app.js.
-  originals: [
+  // Whether the 400 questions written for this app are mixed in with the official College Board and ACT ones.
+  // Until someone picks, it is 'auto' and follows their account: official questions only for anyone invited to
+  // the shared library, since they have those, and the written ones included for everyone else, for whom they
+  // are all there is (see includesWritten in app.js). Leaving them out never leaves a test with nothing: see
+  // choosePool. This setting was once called "originals"; the new name means a value saved under the old one,
+  // which saving any other setting also wrote, doesn't count as a choice.
+  questions: [
     ['on', 'Included', 'Practise with them alongside the official questions, so there are far more to go round.'],
     ['off', 'Official only', 'Only College Board and ACT questions. Fewer of them, so they come round again sooner.'],
   ],
@@ -61,7 +65,8 @@ export const CHOICES = {
 
 export const KEYS = Object.keys(DEFAULTS);
 
-const valid = (key, value) => CHOICES[key].some(([id]) => id === value);
+// A default that isn't one of the offered choices, like 'auto', is valid too: it means nothing has been picked.
+const valid = (key, value) => value === DEFAULTS[key] || CHOICES[key].some(([id]) => id === value);
 
 export function loadSettings() {
   try {

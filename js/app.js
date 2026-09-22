@@ -115,6 +115,12 @@ function dedupe(questions) {
 
 const isOfficial = q => q.source === 'cb-export' || q.source === 'act-export';
 
+// Whether the questions written for this app are mixed in with the official ones. Until someone chooses,
+// their account decides: anyone invited to the shared library has the official questions and practises with
+// those alone, and everyone else gets the written ones, which are all they have.
+const invitedToLibrary = () => cloudLibrary.access === 'admin' || cloudLibrary.access === 'tester';
+const includesWritten = () => (settings.questions === 'auto' ? !invitedToLibrary() : settings.questions === 'on');
+
 function choosePool() {
   const own = allQuestions.filter(q => examOfQuestion(q) === examId);
   const borrow = !own.length && exam.source === 'cb';
@@ -123,7 +129,7 @@ function choosePool() {
   // yet keeps them anyway: switching it off there would leave nothing to practise at all, which helps
   // nobody, and the Library page says that is what happened.
   const official = candidates.filter(isOfficial);
-  const wantsOfficial = settings.originals === 'off';
+  const wantsOfficial = !includesWritten();
   pool = dedupe(wantsOfficial && official.length ? official : candidates);
   byId = new Map(pool.map(q => [q.id, q]));
   library = {
@@ -1878,10 +1884,11 @@ function viewLibrary() {
         ? `<p class="note">No official questions are built in yet, so ${plural(pool.length, 'demo question')} are in use. To add real ones, ${addQuestionsHint()}.</p>`
         : `<p class="muted">${plural(pool.length, `${exam.name} question`)}. To add more, ${addQuestionsHint()}.</p>`;
 
+  const chosen = settings.questions !== 'auto';
   const originalsNote = library.originalsHidden
-    ? '<p class="hint">Official questions only: the ones written for this app are switched off in <a href="#/settings">Settings</a>.</p>'
+    ? `<p class="hint">Official questions only: the ones written for this app are ${chosen ? 'switched off' : 'left out, because you have the official library'}. Change that in <a href="#/settings">Settings</a>.</p>`
     : library.originalsKept
-      ? `<p class="hint">You chose official questions only, but there are no official ${exam.name} questions yet, so the ones written for this app are in use. Change it in <a href="#/settings">Settings</a>.</p>`
+      ? `<p class="hint">${chosen ? 'You chose official questions only' : 'Official questions only is the choice for your account'}, but there are no official ${exam.name} questions yet, so the ones written for this app are in use. Change it in <a href="#/settings">Settings</a>.</p>`
       : '';
 
   view.innerHTML = `
@@ -2068,7 +2075,7 @@ const SETTING_GROUPS = [
   ['contrast', 'Contrast', 'Turn this up if text or borders are hard to make out.'],
   ['motion', 'Animation', 'How much the app moves as pages and answers appear.'],
   ['explain', 'Explain with AI', 'A hint before you answer, and an explanation afterwards, written by Google’s Gemini. Questions you ask about are sent to Google.'],
-  ['originals', 'Questions written for this app', 'Alongside the official College Board and ACT questions there are 400 SAT-style ones written for this app, each answer checked by a test. Your progress on them is kept either way.'],
+  ['questions', 'Questions written for this app', 'Alongside the official College Board and ACT questions there are 400 SAT-style ones written for this app, each answer checked by a test. Your progress on them is kept either way.'],
 ];
 
 function viewSettings() {
@@ -2078,20 +2085,25 @@ function viewSettings() {
     <div class="settings-grid">
       ${SETTING_GROUPS.filter(([key]) => (key !== 'explain' || explainConfigured)
         // Without any official questions the written ones are all there is, so the choice would do nothing.
-        && (key !== 'originals' || allQuestions.some(isOfficial))).map(([key, title, note]) => `
+        && (key !== 'questions' || allQuestions.some(isOfficial))).map(([key, title, note]) => {
+        // Until one is picked, the choice showing is the one this account gets on its own.
+        const current = key === 'questions' ? (includesWritten() ? 'on' : 'off') : settings[key];
+        const auto = key === 'questions' && settings.questions === 'auto';
+        return `
         <section class="card setting">
           <h2 id="set-${key}">${title}</h2>
-          <p class="hint">${note}</p>
+          <p class="hint">${note}${auto ? ` Set for your account${invitedToLibrary() ? ', because you have the official library' : ''}; pick one to choose for yourself.` : ''}</p>
           <div class="swatches" role="radiogroup" aria-labelledby="set-${key}">
             ${CHOICES[key].map(([value, label, about]) => `
-              <button type="button" class="swatch${settings[key] === value ? ' on' : ''}" role="radio"
-                aria-checked="${settings[key] === value}" data-set="${key}" data-value="${value}" data-preview="${value}">
+              <button type="button" class="swatch${current === value ? ' on' : ''}" role="radio"
+                aria-checked="${current === value}" data-set="${key}" data-value="${value}" data-preview="${value}">
                 ${key === 'accent' ? '<i class="swatch-dot" aria-hidden="true"></i>' : ''}
                 <span class="swatch-name"${key === 'textsize' ? ` style="font-size:${{ small: 13, medium: 15, large: 17, xlarge: 19 }[value]}px"` : ''}>${esc(label)}</span>
                 ${about ? `<small>${esc(about)}</small>` : ''}
               </button>`).join('')}
           </div>
-        </section>`).join('')}
+        </section>`;
+      }).join('')}
     </div>
     <div class="card">
       <h2>Sample</h2>
@@ -2115,14 +2127,14 @@ function viewSettings() {
     settings = { ...settings, [set]: value };
     saveSettings(settings);
     applySettings(settings);
-    if (set === 'originals') {
+    if (set === 'questions') {
       // Which questions exist changes, so practice has to start again from the new set.
       session = null;
       choosePool();
       renderNav(currentRoute);
     }
     viewSettings();
-    toast(set === 'originals' ? `Saved: ${plural(pool.length, `${exam.name} question`)} now in use` : 'Saved');
+    toast(set === 'questions' ? `Saved: ${plural(pool.length, `${exam.name} question`)} now in use` : 'Saved');
   });
   confirmButton('#reset', 'Click again to erase progress', () => {
     // The reset time travels with synced progress, so every signed-in device drops what came before it.
