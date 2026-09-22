@@ -1961,11 +1961,14 @@ function testersPanel(panel) {
       : 'Choose a code to give your testers. Anyone who signs in and enters it gets the whole library.'}</p>
     <form class="code-form" id="invite-form">
       <label for="invite-new">Invite code</label>
-      <input id="invite-new" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(panel.code || suggestCode())}">
+      <input id="invite-new" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(panel.code ? readableCode(panel.code) : suggestCode())}">
       <button type="submit">${panel.code ? 'Change code' : 'Save code'}</button>
     </form>
     ${joined}`;
 }
+
+// Shown in groups of four so it is easy to read out; it is compared without the dashes, so either works.
+const readableCode = code => code.replace(/(.{4})(?=.)/g, '$1-');
 
 // A code that is hard to guess but easy to read aloud: no 0/o, 1/l or i, in groups of four.
 function suggestCode() {
@@ -1996,7 +1999,7 @@ function bindSharedLibraryCard() {
     e.preventDefault();
     try {
       const code = await saveInviteCode($('#invite-new').value);
-      toast(`Invite code saved: ${code.replace(/(.{4})(?=.)/g, '$1-')}`);
+      toast(`Invite code saved: ${readableCode(code)}`);
       loadTestersPanel();
     } catch (err) {
       toast(err.message);
