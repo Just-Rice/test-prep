@@ -13,7 +13,10 @@ import { mountCalculator } from './calc.js';
 import {
   initSync, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState,
 } from './sync.js';
-import { libraryAccess, loadCloudQuestions, pictureUrl, publishLibrary } from './library-cloud.js';
+import {
+  joinWithCode, libraryAccess, listTesters, loadCloudQuestions, MIN_CODE, pictureUrl, plainCode, publishLibrary,
+  readInviteCode, removeTester, saveInviteCode,
+} from './library-cloud.js';
 import { decodeLibrary, pictureIds } from './library-bundle.js';
 
 const APP_NAME = 'Test Prep';
@@ -1900,7 +1903,7 @@ function viewLibrary() {
     </div>
     <p class="hint">Appearance, text size and resetting your progress live on the <a href="#/settings">Settings</a> page.</p>`;
 
-  on('#upload-library', 'click', e => uploadSharedLibrary(e.currentTarget));
+  bindSharedLibraryCard();
 }
 
 // Questions built from official PDFs are never part of the site itself, because the repository is
@@ -1919,7 +1922,12 @@ function sharedLibraryCard() {
     idle: '<p class="hint">Checking…</p>',
     checking: '<p class="hint">Checking whether this account has been invited…</p>',
     'not-invited': `<p class="hint">This account hasn’t been invited to the shared library, so practice uses the
-      questions built into the site. Ask whoever runs this app to add you.</p>`,
+      questions built into the site. If you’ve been given an invite code, enter it here.</p>
+      <form class="code-form" id="join-library">
+        <label for="invite-code">Invite code</label>
+        <input id="invite-code" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+        <button class="primary" type="submit">Join</button>
+      </form>`,
     loading: `<p class="hint">Downloading the shared library${s.progress ? ` — piece ${s.progress.done} of ${s.progress.total}` : ''}…</p>`,
     empty: '<p class="hint">You’re invited, but no library has been uploaded yet.</p>',
     ready: `<p class="muted">${plural(s.count, 'question')} from the shared library${packed ? `, packed ${packed}` : ''}.
@@ -1931,9 +1939,94 @@ function sharedLibraryCard() {
   const admin = s.access === 'admin'
     ? `<div class="actions"><button class="primary" type="button" id="upload-library">Upload this device’s library</button></div>
        <p class="hint">Build it first with <code>npm run build</code>, then <code>npm run pack</code>. Everyone on the
-       tester list picks it up the next time they sign in.</p>`
+       tester list picks it up the next time they sign in.</p>
+       ${testersPanel(s.admin)}`
     : '';
   return card(status + admin);
+}
+
+// What only the admin sees: the code testers join with, and who has joined.
+function testersPanel(panel) {
+  if (!panel) return '<h3>Testers</h3><p class="hint">Loading…</p>';
+  if (panel.error) return `<h3>Testers</h3><p class="warn">${esc(panel.error)}</p>`;
+  const joined = panel.testers.length
+    ? `<ul class="tester-list">${panel.testers.map(t => `
+        <li><span>${esc(t.name || 'An account with no name')}</span>
+          <span class="hint">${t.joinedAt ? `joined ${new Date(t.joinedAt).toLocaleDateString()}` : 'added by hand'}</span>
+          <button type="button" class="link" data-remove-tester="${esc(t.uid)}">Remove</button></li>`).join('')}</ul>`
+    : '<p class="hint">Nobody has joined yet.</p>';
+  return `<h3>Testers</h3>
+    <p class="hint">${panel.code
+      ? 'Anyone who signs in and enters this code gets the whole library. Change it to stop new people joining; everyone already in keeps their access.'
+      : 'Choose a code to give your testers. Anyone who signs in and enters it gets the whole library.'}</p>
+    <form class="code-form" id="invite-form">
+      <label for="invite-new">Invite code</label>
+      <input id="invite-new" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(panel.code || suggestCode())}">
+      <button type="submit">${panel.code ? 'Change code' : 'Save code'}</button>
+    </form>
+    ${joined}`;
+}
+
+// A code that is hard to guess but easy to read aloud: no 0/o, 1/l or i, in groups of four.
+function suggestCode() {
+  const letters = 'abcdefghjkmnpqrstuvwxyz23456789';
+  const picks = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(picks, n => letters[n % letters.length]).join('').replace(/(.{4})(?=.)/g, '$1-');
+}
+
+function bindSharedLibraryCard() {
+  on('#upload-library', 'click', e => uploadSharedLibrary(e.currentTarget));
+  on('#join-library', 'submit', async e => {
+    e.preventDefault();
+    const button = e.currentTarget.querySelector('button');
+    const code = $('#invite-code').value;
+    if (plainCode(code).length < MIN_CODE) return toast('That invite code is too short. Check it and try again.');
+    button.disabled = true;
+    try {
+      await joinWithCode(syncState().uid, code, syncState().account);
+      toast('You’re in. Loading the shared library…');
+      cloudLibraryFor = null;          // look again: this account is on the tester list now
+      syncCloudLibrary(syncState());
+    } catch (err) {
+      toast(err.message);
+      button.disabled = false;
+    }
+  });
+  on('#invite-form', 'submit', async e => {
+    e.preventDefault();
+    try {
+      const code = await saveInviteCode($('#invite-new').value);
+      toast(`Invite code saved: ${code.replace(/(.{4})(?=.)/g, '$1-')}`);
+      loadTestersPanel();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  on('[data-remove-tester]', 'click', async e => {
+    const button = e.currentTarget;
+    if (button.dataset.confirm !== 'yes') {
+      button.dataset.confirm = 'yes';
+      button.textContent = 'Click again to remove';
+      return;
+    }
+    try {
+      await removeTester(button.dataset.removeTester);
+      toast('Removed. The shared library stops loading for them the next time they open the app.');
+      loadTestersPanel();
+    } catch (err) {
+      toast(`Could not remove them: ${err.message}`);
+    }
+  });
+}
+
+async function loadTestersPanel() {
+  try {
+    const [code, testers] = await Promise.all([readInviteCode(), listTesters()]);
+    cloudLibrary = { ...cloudLibrary, admin: { code, testers } };
+  } catch {
+    cloudLibrary = { ...cloudLibrary, admin: { error: 'The tester list could not be loaded. Check that the latest firestore.rules are published.' } };
+  }
+  refreshForLibrary();
 }
 
 async function uploadSharedLibrary(button) {
@@ -2267,7 +2360,7 @@ function refreshForLibrary({ questionsChanged = false } = {}) {
   if (card) {
     quietly(() => {
       card.outerHTML = sharedLibraryCard();
-      on('#upload-library', 'click', e => uploadSharedLibrary(e.currentTarget));
+      bindSharedLibraryCard();
     });
   }
   if (!questionsChanged) return renderNav(currentRoute);
@@ -2303,6 +2396,7 @@ async function syncCloudLibrary({ uid }) {
 
   cloudLibrary = { status: 'loading', access };
   refreshForLibrary();
+  if (access === 'admin') loadTestersPanel();
   let questionsChanged = false;
   try {
     const loaded = await loadCloudQuestions({
@@ -2314,12 +2408,13 @@ async function syncCloudLibrary({ uid }) {
     });
     if (stale()) return;
     if (!loaded) {
-      cloudLibrary = { status: 'empty', access };
+      cloudLibrary = { status: 'empty', access, admin: cloudLibrary.admin };
     } else {
       cloudQuestions = loaded.questions;
       cloudLibrary = {
         status: 'ready', access, count: loaded.questions.length,
         packedAt: loaded.packedAt, cached: loaded.cached, bytes: loaded.bytes,
+        admin: cloudLibrary.admin,   // the tester list may have arrived while the questions downloaded
       };
       applyLibrary();
       questionsChanged = true;
@@ -2327,7 +2422,7 @@ async function syncCloudLibrary({ uid }) {
     }
   } catch (err) {
     if (stale()) return;
-    cloudLibrary = { status: 'error', access, message: err.message };
+    cloudLibrary = { status: 'error', access, message: err.message, admin: cloudLibrary.admin };
   }
   refreshForLibrary({ questionsChanged });
 }

@@ -63,6 +63,53 @@ export async function libraryAccess(uid) {
   return null;
 }
 
+// ---------- the invite code ----------
+//
+// Testers can join with a code instead of being added by hand. The admin chooses it; it is kept at
+// settings/invite, which only an admin may read, and firestore.rules compares what a tester types against
+// it before letting them onto the testers/ list, so the code never has to be sent to anyone's browser to be
+// checked. Codes are compared without case, spaces or dashes, so "K7M2-X9QP" and "k7m2x9qp" are the same.
+
+export const MIN_CODE = 8;
+export const plainCode = code => String(code ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+export async function joinWithCode(uid, code, name) {
+  const { doc, setDoc } = fb.firestore;
+  try {
+    await setDoc(doc(fb.db, 'testers', uid), { code: plainCode(code), name: String(name || '').slice(0, 80), joinedAt: new Date().toISOString() });
+  } catch (err) {
+    // The rules refuse a wrong code the same way as any other refusal.
+    if (err?.code === 'permission-denied') throw new Error('That invite code isn’t right. Check it with whoever gave it to you and try again.');
+    throw new Error('Could not join just now. Check your connection and try again.');
+  }
+}
+
+export async function readInviteCode() {
+  const { doc, getDoc } = fb.firestore;
+  const snap = await getDoc(doc(fb.db, 'settings', 'invite'));
+  return snap.exists() ? snap.data().code : null;
+}
+
+export async function saveInviteCode(code) {
+  const plain = plainCode(code);
+  if (plain.length < MIN_CODE) throw new Error(`An invite code needs at least ${MIN_CODE} letters or numbers, so it can’t be guessed.`);
+  const { doc, setDoc } = fb.firestore;
+  await setDoc(doc(fb.db, 'settings', 'invite'), { code: plain, changedAt: new Date().toISOString() });
+  return plain;
+}
+
+export async function listTesters() {
+  const { collection, getDocs } = fb.firestore;
+  const snap = await getDocs(collection(fb.db, 'testers'));
+  return snap.docs.map(d => ({ uid: d.id, name: d.data().name || '', joinedAt: d.data().joinedAt || null }))
+    .sort((a, b) => String(a.joinedAt).localeCompare(String(b.joinedAt)));
+}
+
+export async function removeTester(uid) {
+  const { doc, deleteDoc } = fb.firestore;
+  await deleteDoc(doc(fb.db, 'testers', uid));
+}
+
 // ---------- reading it ----------
 
 export async function readManifest() {

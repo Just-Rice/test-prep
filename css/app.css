@@ -792,3 +792,13 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 .ai-note.thinking { color: var(--muted); font-style: italic; }
 .ai-note.bad { background: var(--low-soft); border-left-color: var(--low); color: var(--ink); }
 .mistake-body .ai-note { margin-top: 0; }
+
+/* ---------- shared library: invite code and testers ---------- */
+.code-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 10px; }
+.code-form label { font-weight: 600; font-size: 14px; }
+.code-form input { flex: 1 1 12rem; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.04em; }
+#shared-library h3 { font-size: 16px; margin: 20px 0 4px; }
+.tester-list { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
+.tester-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--rule); }
+.tester-list li > span:first-child { font-weight: 600; }
+.tester-list button.link { margin-left: auto; color: var(--low); }

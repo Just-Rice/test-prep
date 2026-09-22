@@ -8,16 +8,21 @@ rules_version = '2';
 // The shared question library is a single copy of the built questions that invited testers can read. It exists
 // so a tester can open the site, sign in, and have questions without downloading or importing anything.
 //
-// Who may see it is decided by two collections that the app itself can never write to:
-//   admins/{uid}    may upload or replace the library
+// Who may see it is decided by two lists:
+//   admins/{uid}    may upload or replace the library, choose the invite code, and see or remove testers
 //   testers/{uid}   may read the library
 //
-// Because `allow write: if false` applies to both lists, membership can only ever be granted by hand in the
-// Firebase console. A stolen or malicious account cannot add itself, and simply signing up gives no access.
+// No client can ever write to admins/, so an admin can only be made by hand in the Firebase console.
+//
+// A tester can be added the same way, by hand, or can join with the invite code. The admin chooses the code
+// in the app; it is kept at settings/invite, which only an admin may read. A signed-in account joins by
+// creating its own testers/ entry holding the code, and the rule below compares that against
+// settings/invite itself, so the code is never sent to anyone's browser to be checked. Without the code,
+// signing up still gives no access. Changing the code stops new people joining; it does not remove anyone.
 //
 // To set this up the first time: Firebase console -> Authentication, copy your own User UID, then in
-// Firestore create a document at admins/<your-uid> (any contents, an empty document is fine). Add each
-// beta tester the same way at testers/<their-uid> once they have signed in at least once.
+// Firestore create a document at admins/<your-uid> (any contents, an empty document is fine). Then choose
+// an invite code on the app's Library page, or add each tester by hand at testers/<their-uid>.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -44,14 +49,27 @@ service cloud.firestore {
     }
 
     // The membership lists. Each person may check their own entry, so the app can tell a tester whether they
-    // have been invited yet, but no client can ever write one.
+    // have been invited yet. No client can ever write an admin.
     match /admins/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow write: if false;
     }
     match /testers/{uid} {
-      allow read: if signedIn() && request.auth.uid == uid;
-      allow write: if false;
+      allow read: if (signedIn() && request.auth.uid == uid) || isAdmin();
+      // Joining with the invite code: only for one's own account, only by creating the entry (so an entry
+      // can never be changed afterwards), only with the current code, and only the fields the app writes.
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['code', 'name', 'joinedAt'])
+        && request.resource.data.code is string
+        && request.resource.data.code.size() >= 8
+        && exists(/databases/$(database)/documents/settings/invite)
+        && request.resource.data.code == get(/databases/$(database)/documents/settings/invite).data.code;
+      allow delete: if isAdmin();
+    }
+
+    // The invite code itself: only an admin may see it or change it.
+    match /settings/invite {
+      allow read, write: if isAdmin();
     }
   }
 }
