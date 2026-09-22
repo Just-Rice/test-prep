@@ -9,11 +9,12 @@
 // Many exported questions are pictures of maths rather than text (the export draws equations and graphs as
 // graphics), so the question image is sent alongside whatever text there is.
 //
-// App Check is enforced now, not at some future date. Enabling AI Logic switches it on, and an unregistered
-// client is refused outright: the endpoint answers 401 "Firebase App Check token is invalid" rather than
-// producing a hint. So RECAPTCHA_SITE_KEY in js/firebase-config.js is required, not optional.
+// App Check: see registerAppCheck below. For now it is set to monitor rather than enforce for AI Logic, but
+// Firebase will enforce it for AI Logic permanently from 2 November 2026, after which an unverified request is
+// refused with 401 "Firebase App Check token is invalid" rather than producing a hint.
 
 import { FIREBASE_CONFIG, RECAPTCHA_SITE_KEY } from './firebase-config.js';
+import { pictureUrl } from './library-cloud.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
 const MODEL = 'gemini-3.8-flash';   // free tier on the Gemini Developer API
@@ -60,18 +61,25 @@ async function getModel() {
     const backend = ai.getAI(firebaseApp, { backend: new ai.GoogleAIBackend() });
     model = ai.getGenerativeModel(backend, {
       model: MODEL,
-      generationConfig: { maxOutputTokens: 600, temperature: 0.3 },
+      // Thinking is turned off. This model thinks before it answers, and the thinking counts against the
+      // same 600-token allowance: measured on a 150-word explanation it spent 574 tokens thinking and was cut
+      // off after 22 words of answer. With thinking off the same request finished in full, in about three
+      // seconds. Hints and explanations here are short and are given the right answer, so they don't need it.
+      generationConfig: { maxOutputTokens: 600, temperature: 0.3, thinkingConfig: { thinkingBudget: 0 } },
     });
     return model;
   })();
   return loading;
 }
 
-// The built library stores images as files under data/img, so they are fetched and inlined as base64.
+// Pictures are fetched and inlined as base64. A library built on this device keeps them as files under
+// data/img; the shared library names each one by id and fetches it on demand, so both have to be handled,
+// or Gemini is sent a maths question without the picture that is the question.
 async function imagePart(image) {
-  if (!image?.src) return null;
+  const src = image?.src ?? (image?.id ? await pictureUrl(image.id).catch(() => null) : null);
+  if (!src) return null;
   try {
-    const res = await fetch(image.src);
+    const res = await fetch(src);
     if (!res.ok) return null;
     const blob = await res.blob();
     const data = await new Promise((resolve, reject) => {
@@ -129,7 +137,12 @@ function describeError(err) {
   if (/enabled?\b/i.test(message) && /\bai\b|vertexai|ailogic/i.test(message)) {
     return 'Gemini isn’t switched on for this Firebase project yet. In the Firebase console open AI Logic, click “Get started”, then try again in a few minutes.';
   }
-  if (/quota|429|exhausted/i.test(message)) return 'Gemini’s free daily limit has been reached. Try again tomorrow.';
+  // The free tier limits both how many requests a minute and how many a day, with the same message for
+  // both, so this can't say which one was hit.
+  if (/quota|429|exhausted/i.test(message)) {
+    return 'Gemini’s free allowance is used up for the moment. Try again in a minute; if it keeps happening, today’s limit has been reached and it resets tomorrow.';
+  }
+  if (/high demand|overloaded|unavailable|\b50[03]\b/i.test(message)) return 'Gemini is very busy right now. Try again in a minute.';
   // App Check must be tested before the network branch. A rejected token arrives as code "fetch-error" with
   // "Error fetching from ..." in the message, so the network test below swallowed it and told the student to
   // check their internet connection while the real cause was a 401 for a missing App Check token.
