@@ -129,16 +129,26 @@ const isOfficial = q => q.source === 'cb-export' || q.source === 'act-export';
 const invitedToLibrary = () => cloudLibrary.access === 'admin' || cloudLibrary.access === 'tester';
 const includesWritten = () => (settings.questions === 'auto' ? !invitedToLibrary() : settings.questions === 'on');
 
-function choosePool() {
-  const own = allQuestions.filter(q => examsOfQuestion(q).includes(examId));
-  const borrow = !own.length && exam.source === 'cb';
+// The questions a test practises with, worked out for any test so the sidebar can say what each one has.
+function poolFor(id) {
+  const own = allQuestions.filter(q => examsOfQuestion(q).includes(id));
+  const borrow = !own.length && EXAMS[id].source === 'cb';
   const candidates = borrow ? allQuestions.filter(q => examsOfQuestion(q).includes('sat')) : own;
   // "Official only" leaves out the questions written for this app. A test with no official questions
   // yet keeps them anyway: switching it off there would leave nothing to practise at all, which helps
   // nobody, and the Library page says that is what happened.
   const official = candidates.filter(isOfficial);
   const wantsOfficial = !includesWritten();
-  pool = dedupe(wantsOfficial && official.length ? official : candidates);
+  return { own, borrow, candidates, official, wantsOfficial, questions: dedupe(wantsOfficial && official.length ? official : candidates) };
+}
+
+let poolSizes = {};   // questions per test, for the test switcher
+
+function choosePool() {
+  const pools = Object.fromEntries(EXAM_IDS.map(id => [id, poolFor(id)]));
+  poolSizes = Object.fromEntries(EXAM_IDS.map(id => [id, { count: pools[id].questions.length, borrowed: pools[id].borrow }]));
+  const { own, borrow, candidates, official, wantsOfficial } = pools[examId];
+  pool = pools[examId].questions;
   byId = new Map(pool.map(q => [q.id, q]));
   library = {
     ...library, own: own.length, borrowed: borrow && pool.length > 0,
@@ -397,6 +407,57 @@ function pageHead(title, { eyebrow = '', actions = '' } = {}) {
     </header>`;
 }
 
+// Which test is being studied, at the top of the sidebar, since the pages below it depend on it: the MCAT has
+// Lessons, the PSAT/NMSQT a National Merit estimate, and so on. Opening it shows what each test has to offer.
+// Collapsed, it shrinks to the test's short code, as the pages shrink to icons.
+const TEST_CODES = { sat: 'SAT', psat: 'PSAT', psat89: '8/9', act: 'ACT', mcat: 'MCAT' };
+let testMenuOpen = false;
+
+function testSummary(id) {
+  const size = poolSizes[id];
+  if (!size) return '';
+  const parts = [size.count ? `${size.count.toLocaleString()} questions` : 'no questions yet'];
+  if (size.borrowed) parts[0] += ', borrowed from the SAT';
+  if (LESSONS[id]?.length) parts.push('lessons');
+  return parts.join(' · ');
+}
+
+function testPickerHtml(collapsed) {
+  const tip = text => (collapsed ? ` title="${esc(text)}"` : '');
+  return `<div class="test-picker${testMenuOpen ? ' open' : ''}">
+      <button type="button" class="test-current" id="test-toggle" aria-expanded="${testMenuOpen}" aria-controls="test-menu"
+        aria-label="Studying for ${esc(exam.long)}. Change test"${tip(`Studying for ${exam.long}`)}>
+        <span class="test-code">${TEST_CODES[examId]}</span>
+        <span class="label"><small>Studying for</small><strong>${esc(exam.long)}</strong></span>
+        <svg class="icon test-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9.5 6 6 6-6"/></svg>
+      </button>
+      <div class="test-menu" id="test-menu" role="group" aria-label="Tests"${testMenuOpen ? '' : ' hidden'}>
+        ${EXAM_IDS.map(id => `<button type="button" data-exam="${id}" aria-pressed="${id === examId}"${id === examId ? ' class="on"' : ''}${tip(EXAMS[id].long)}>
+          <span class="test-code">${TEST_CODES[id]}</span>
+          <span class="label"><strong>${esc(EXAMS[id].long)}</strong><small>${testSummary(id)}</small></span>
+        </button>`).join('')}
+      </div>
+    </div>`;
+}
+
+function setTestMenu(open) {
+  testMenuOpen = open;
+  const picker = side.querySelector('.test-picker');
+  if (!picker) return;
+  picker.classList.toggle('open', open);
+  picker.querySelector('#test-toggle').setAttribute('aria-expanded', String(open));
+  picker.querySelector('#test-menu').hidden = !open;
+}
+
+side.addEventListener('click', e => {
+  if (e.target.closest('#test-toggle')) setTestMenu(!testMenuOpen);
+  else if (e.target.closest('.test-menu [data-exam]')) testMenuOpen = false;   // the switch redraws the sidebar closed
+});
+document.addEventListener('click', e => { if (testMenuOpen && !e.target.closest('.test-picker')) setTestMenu(false); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && testMenuOpen) { setTestMenu(false); side.querySelector('#test-toggle')?.focus(); }
+});
+
 // The sidebar on wide screens; a top bar, bottom tabs and a "More" sheet on phones.
 function renderNav(active) {
   const due = dueMistakes(progress.mistakes).filter(id => byId.has(id)).length;
@@ -423,6 +484,7 @@ function renderNav(active) {
       <a class="brand" href="#/home">${APP_NAME}</a>
       <button type="button" class="collapse" id="collapse" aria-label="${toggleLabel}" title="${toggleLabel}" aria-expanded="${!collapsed}">${icon('chevron')}</button>
     </div>
+    ${testPickerHtml(collapsed)}
     <nav class="side-nav" aria-label="Main">${links.map(([r, label]) => {
       const name = r === 'review' && due ? `${label}, ${due} due` : r === 'test' && testRunning ? `${label}, in progress` : label;
       return `<a href="#/${r}"${current(r)} aria-label="${name}"${tip(name)}>${icon(r)}<span class="label">${label}</span>${badge(r)}</a>`;
