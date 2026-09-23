@@ -2691,6 +2691,7 @@ loadLibrary().then(result => {
     if (ownQuestions.length) refreshForLibrary({ questionsChanged: true });
   });
   let lastPhase = null;
+  let wasSignedIn = false;
   initSync({
     exams: EXAM_IDS,
     getProgress: id => progressByExam[id],
@@ -2710,6 +2711,12 @@ loadLibrary().then(result => {
       lastPhase = state.account ? (lastPhase === 'synced' ? 'synced' : state.phase) : null;
       renderNav(currentRoute);
       if (currentRoute === 'account') quietly(viewAccount);
+      // Hints are offered only when signed in, and a returning student's sign-in is restored a moment after the
+      // first page is drawn, so a question page drawn in that moment offered "Sign in for hints" to someone
+      // who was. Draw it again, quietly, whenever signing in or out changes which one it should show.
+      const nowSignedIn = Boolean(state.account);
+      if (nowSignedIn !== wasSignedIn && ['practice', 'review', 'mistakes'].includes(currentRoute)) render({ quiet: true });
+      wasSignedIn = nowSignedIn;
       syncCloudLibrary(state);
     },
   });
