@@ -760,7 +760,9 @@ function addQuestionsHint() {
 }
 
 function viewStart() {
-  const placementSections = scoredSections(exam);
+  // Only sections with questions can be placed; the rest are passed over (see finishPlacement), so they aren't
+  // offered. For the MCAT that is, for now, Chem/Phys alone.
+  const placementSections = scoredSections(exam).filter(s => sectionCount(s.id));
   const small = placementSections.some(s => sectionCount(s.id) < 15);
   view.innerHTML = `
     ${pageHead('How should we find your level?', { eyebrow: exam.long })}
