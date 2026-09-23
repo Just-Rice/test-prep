@@ -30,8 +30,10 @@ const DB_NAME = 'satprep-library';
 const DB_VERSION = 2;
 const CACHE_KEY = 'current';
 const UPLOADS_AT_ONCE = 8;            // deletions of pictures no longer used, sent side by side
-const BATCH_WRITES = 400;             // Firestore's own limit is 500 writes in one batch
-const BATCH_BYTES = 4 * 1024 * 1024;  // and 10 MiB in one request
+// Firestore allows 500 writes and 10 MiB in one batch, but 4 MiB batches made the SDK report "write stream
+// exhausted" and back off for a minute at a time, so batches are kept well below either limit.
+const BATCH_WRITES = 200;
+const BATCH_BYTES = 1024 * 1024;
 
 let fb = null;
 
@@ -141,6 +143,8 @@ export async function loadCloudQuestions({ onProgress = () => {} } = {}) {
     bytes = join(pieces);
     if (manifest.bytes && bytes.length !== manifest.bytes) throw new Error('the library downloaded incompletely; try again');
     await cachePut('core', CACHE_KEY, { version: manifest.version, bytes: bytes.slice().buffer });
+    // A new version can drop pictures the old one used; this device's copies of those are no longer needed.
+    await pruneImages(new Set(listOf(manifest.images)));
   }
 
   const { questions, packedAt, builtAt } = await decodeLibrary(bytes);
@@ -281,6 +285,25 @@ async function cacheGet(store, key) {
     return value ?? null;
   } catch {
     return null;   // private browsing, or storage turned off: fetch it again instead
+  }
+}
+
+// Removes this device's copies of pictures the current library no longer uses.
+async function pruneImages(keep) {
+  if (!keep.size) return;
+  try {
+    const db = await openDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('images', 'readwrite');
+      const store = tx.objectStore('images');
+      const request = store.getAllKeys();
+      request.onsuccess = () => { for (const key of request.result) if (!keep.has(key)) store.delete(key); };
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    // Tidying is best effort; the pictures would only take up space.
   }
 }
 

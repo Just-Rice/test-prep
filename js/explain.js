@@ -149,6 +149,11 @@ function describeError(err) {
   if (/app.?check/i.test(message)) {
     return 'This copy of the app isn’t registered with Firebase App Check, so Gemini refused the request. It needs an App Check site key adding.';
   }
+  // Gemini answers signed-in students only (authenticated-users mode), so a lapsed sign-in is refused as 401
+  // unauthenticated. Tested after App Check, whose refusals are also 401s but name App Check.
+  if (/\b401\b|unauthenticated|authentication credential/i.test(message)) {
+    return 'Your sign-in has expired, so Gemini can’t answer. Sign in again on the Account page, then try once more.';
+  }
   if (/network|offline|failed to fetch/i.test(message)) return 'Could not reach Gemini. Check your internet connection.';
   if (/api.?key|not.?found|404/i.test(message)) return 'Gemini is not set up for this project yet. Enable Firebase AI Logic in the Firebase console.';
   return `Gemini could not answer: ${message}`;

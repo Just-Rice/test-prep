@@ -37,9 +37,39 @@ service cloud.firestore {
       return isAdmin() || (signedIn() && exists(/databases/$(database)/documents/testers/$(request.auth.uid)));
     }
 
-    // A student's own progress, as before.
-    match /users/{uid}/{document=**} {
-      allow read, write: if signedIn() && request.auth.uid == uid;
+    // A student's own progress. Only the documents the app writes are allowed, each a single "json" string of
+    // bounded size, so an account (anyone can make one) can't be used to store anything else here: for each test,
+    // its main document and its answers in half-month chunks named like 2026-09-2 (see js/sync-core.js). The
+    // SAT keeps the place it had before other tests existed. A new test needs adding to the list below.
+    function ownedBy(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+    function progressDocument() {
+      return request.resource.data.keys().hasOnly(['json'])
+        && request.resource.data.json is string
+        && request.resource.data.json.size() <= 900000;
+    }
+    function period(id) {
+      return id.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-[12]$');
+    }
+    function otherTest(exam) {
+      return exam in ['psat', 'psat89', 'act', 'mcat'];
+    }
+    match /users/{uid} {
+      allow read, delete: if ownedBy(uid);
+      allow create, update: if ownedBy(uid) && progressDocument();
+    }
+    match /users/{uid}/responses/{chunk} {
+      allow read, delete: if ownedBy(uid);
+      allow create, update: if ownedBy(uid) && period(chunk) && progressDocument();
+    }
+    match /users/{uid}/exams/{exam} {
+      allow read, delete: if ownedBy(uid) && otherTest(exam);
+      allow create, update: if ownedBy(uid) && otherTest(exam) && progressDocument();
+    }
+    match /users/{uid}/exams/{exam}/responses/{chunk} {
+      allow read, delete: if ownedBy(uid) && otherTest(exam);
+      allow create, update: if ownedBy(uid) && otherTest(exam) && period(chunk) && progressDocument();
     }
 
     // The shared question library: invited people read it, only an admin replaces it.
@@ -60,6 +90,8 @@ service cloud.firestore {
       // can never be changed afterwards), only with the current code, and only the fields the app writes.
       allow create: if signedIn() && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['code', 'name', 'joinedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80
+        && request.resource.data.joinedAt is string && request.resource.data.joinedAt.size() <= 40
         && request.resource.data.code is string
         && request.resource.data.code.size() >= 8
         && exists(/databases/$(database)/documents/settings/invite)

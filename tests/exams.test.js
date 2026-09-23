@@ -70,3 +70,17 @@ test('the National Merit Selection Index weights Reading and Writing twice', () 
   assert.equal(selectionIndex({ RW: score(700), MATH: null }), null);
   for (const c of NATIONAL_MERIT.commended) assert.ok(c.index >= 48 && c.index <= 228);
 });
+
+// firestore.rules lists where progress may be written, so it has to know every test and the name the answer
+// chunks are given. A test added to the app but not the rules would be refused by the cloud without a word.
+test('the security rules allow progress for every test, in chunks named the way sync names them', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { periodOf } = await import('../js/sync-core.js');
+  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+  const listed = rules.match(/exam in \[([^\]]*)\]/)[1].match(/'([^']+)'/g).map(x => x.slice(1, -1));
+  assert.deepEqual(listed.sort(), EXAM_IDS.filter(id => id !== 'sat').sort());
+  const pattern = new RegExp(rules.match(/id\.matches\('([^']+)'\)/)[1]);
+  for (const at of [Date.UTC(2026, 0, 1), Date.UTC(2026, 8, 15, 23), Date.UTC(2026, 8, 16), Date.UTC(2031, 11, 31)]) {
+    assert.ok(pattern.test(periodOf(at)), periodOf(at));
+  }
+});

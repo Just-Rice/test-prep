@@ -71,6 +71,9 @@ export async function initSync(appHooks, { loadSdk = loadFromCdn } = {}) {
     user = signedIn;
     known = {};
     update({ phase: signedIn ? 'syncing' : 'signed-out', message: null, lastSynced: null });
+    // Before anything on this device is merged into the account: the app clears progress another account
+    // left here, so it isn't added to this one (see onSignIn in app.js).
+    if (signedIn) hooks.onSignIn?.(signedIn.uid);
     if (signedIn) syncNow({ full: true });
   });
   globalThis.document?.addEventListener('visibilitychange', () => {

@@ -55,6 +55,51 @@ let imports = [];             // what those files were
 let cloudLibrary = { status: 'idle', access: null };
 let session = null;     // the active placement, practice or review session
 let test = null;        // the timed practice test, kept separately so browsing other pages doesn't end it
+
+// A timed test in progress is kept on the device as it goes, so a reload, a closed tab or a browser that
+// discards the page doesn't lose it. Questions are kept by id and found again when it is restored; the clock
+// is an end time, so it keeps running while the page is closed, as it would on test day.
+const TEST_KEY = 'satprep.test.v1';
+const LAST_ACCOUNT_KEY = 'satprep.lastAccount';
+function saveTest() {
+  try {
+    if (!test || test.finished) { localStorage.removeItem(TEST_KEY); return; }
+    const s = test;
+    localStorage.setItem(TEST_KEY, JSON.stringify({
+      exam: s.exam, sections: s.sections, sIdx: s.sIdx, module: s.module, route: s.route, results: s.results,
+      used: [...s.used], seenBefore: [...s.seenBefore], panel: s.panel, hideTimer: s.hideTimer,
+      section: s.section, questions: s.questions.map(q => q.id), idx: s.idx, answers: s.answers, flags: [...s.flags],
+      eliminated: Object.fromEntries(Object.entries(s.eliminated).map(([id, set]) => [id, [...set]])),
+      highlights: s.highlights, times: s.times, reviewScreen: s.reviewScreen, onBreak: Boolean(s.onBreak), endsAt: s.endsAt,
+    }));
+  } catch {
+    // Storage full or turned off: the test carries on, it just can't survive a reload.
+  }
+}
+function restoreTest() {
+  if (test) return;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(TEST_KEY)); } catch { /* unreadable: nothing to restore */ }
+  if (!saved) return;
+  const known = new Map(allQuestions.map(q => [q.id, q]));
+  const questions = saved.questions.map(id => known.get(id));
+  // Drawn from the shared library, which arrives a moment after sign-in: tried again once it has.
+  if (questions.some(q => !q)) return;
+  test = {
+    ...saved, questions, used: new Set(saved.used), seenBefore: new Set(saved.seenBefore), flags: new Set(saved.flags),
+    eliminated: Object.fromEntries(Object.entries(saved.eliminated).map(([id, list]) => [id, new Set(list)])),
+    gridOpen: false, highlightMode: false,
+  };
+  toast('Your timed test was restored. Its timer kept running while the page was closed.');
+}
+// Where the student is in a question (time spent, highlights) is otherwise saved only on moving on, so it is
+// saved as the page goes away too.
+window.addEventListener('pagehide', () => {
+  if (!test || test.finished || test.onBreak || currentRoute !== 'test' || test.exam !== examId) return;
+  leaveQuestion();
+  test.shownAt = Date.now();
+  saveTest();
+});
 let currentRoute = null;
 let ticker = null;
 let settings = loadSettings();
@@ -78,7 +123,7 @@ function underline(html, parts) {
 }
 const $ = sel => view.querySelector(sel);
 const on = (sel, event, fn) => view.querySelectorAll(sel).forEach(el => el.addEventListener(event, fn));
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const plural = (n, word) => `${typeof n === 'number' ? n.toLocaleString() : n} ${word}${n === 1 ? '' : 's'}`;
 const sectionName = id => sectionOf(exam, id)?.name ?? id;
 const sectionShort = id => sectionOf(exam, id)?.short ?? id;
 const range = s => `${s.low}–${s.high}`;
@@ -210,6 +255,17 @@ function projectedTotal() {
 }
 
 const totalLabel = () => exam.total.label ?? 'Estimated total';
+// Scored sections with no questions at all yet (the MCAT's, bar Chem/Phys, while they are being written). A
+// total needs every section, so until they arrive the pages say that rather than asking for answers there.
+const sectionsWithout = () => scoredSections(exam).filter(s => !sectionCount(s.id));
+const listNames = names => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+function totalWaitingNote() {
+  const missing = sectionsWithout();
+  if (!missing.length) return null;
+  // Test names are read letter by letter, so the article follows the sound of the first letter: an MCAT, a PSAT.
+  const article = /^[AEFHILMNORSX]/.test(exam.name) ? 'An' : 'A';
+  return `${article} ${exam.name} total needs all ${scoredSections(exam).length} sections, and ${listNames(missing.map(s => s.short))} questions are still being written. Until then, each section with questions gets its own estimate.`;
+}
 const masteryClass = p => (p < 0.45 ? 'low' : p < 0.7 ? 'mid' : 'high');
 const masteryName = p => (p < 0.45 ? 'Needs work' : p < 0.7 ? 'Building' : 'Strong');
 
@@ -507,6 +563,7 @@ function renderNav(active) {
 }
 
 function toggleSidebar() {
+  testMenuOpen = false;   // the chooser folds away with the sidebar, rather than staying open as a column of codes
   const collapsed = shell.classList.toggle('collapsed');
   try { localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0'); } catch { /* storage unavailable */ }
   renderNav(currentRoute);
@@ -1204,7 +1261,7 @@ function viewTest() {
       <div class="empty"><h2>Your ${other.name} practice test is still running</h2>
         <p>Its timer keeps going. Switch back to ${other.long} to finish it, or end it here.</p>
         <div class="actions"><button class="primary" data-exam="${test.exam}">Switch to ${other.name}</button><button id="end-test">End that test</button></div></div>`;
-    confirmButton('#end-test', 'Click again to end it', () => { test = null; render(); });
+    confirmButton('#end-test', 'Click again to end it', () => { test = null; saveTest(); render(); });
     return;
   }
   if (test) {
@@ -1267,6 +1324,7 @@ function beginModule() {
   const s = test;
   s.onBreak = false;
   s.endsAt = Date.now() + sectionOf(exam, s.section).minutes * 60 * 1000;
+  saveTest();
   renderNav('test');
   testScreen();
 }
@@ -1349,6 +1407,7 @@ function leaveQuestion() {
 function goToQuestion(i) {
   leaveQuestion();
   Object.assign(test, { idx: i, reviewScreen: false, gridOpen: false, shownAt: Date.now() });
+  saveTest();
   drawQuestion();
   window.scrollTo(0, 0);
 }
@@ -1388,9 +1447,11 @@ function drawQuestion() {
     ${s.gridOpen ? gridHtml() : ''}`;
   bindAnswerInputs(v => {
     if (v == null) delete s.answers[q.id]; else s.answers[q.id] = v;
+    saveTest();
   }, eliminated);
   on('#flag', 'click', e => {
     if (s.flags.has(q.id)) s.flags.delete(q.id); else s.flags.add(q.id);
+    saveTest();
     e.currentTarget.classList.toggle('on', s.flags.has(q.id));
     e.currentTarget.textContent = s.flags.has(q.id) ? '⚑ Flagged' : '⚐ Flag for review';
   });
@@ -1467,6 +1528,7 @@ function submitModule() {
   // Too few questions left for this module (a small library): skip straight past it.
   if (!s.questions.length) return submitModule();
   s.onBreak = true;
+  saveTest();
   moduleBreak();
 }
 
@@ -1508,6 +1570,7 @@ function finishTest() {
   progress.tests.push(s.record);
   save();
   s.finished = true;
+  saveTest();
   renderNav('test');
   testResults();
 }
@@ -1540,7 +1603,7 @@ function testResults() {
         ${questionHtml(q, { selected: r.choice, revealed: true, correct: r.correct, hideMeta: true })}</details>`;
     }).join('')}
     <div class="actions"><button class="primary" id="done">Done</button></div>`;
-  on('#done', 'click', () => { test = null; go('scores'); });
+  on('#done', 'click', () => { test = null; saveTest(); go('scores'); });
 }
 
 const REFERENCE_SHEET = `<div class="ref"><h3>Formulas</h3><p class="hint">Modeled on the SAT Suite math reference sheet.</p><dl>
@@ -1590,7 +1653,7 @@ function todaysPlan() {
     const first = focus.length > 1 ? Math.ceil(left / 2) : left;
     focus.forEach((skill, k) => {
       const count = k === 0 ? first : left - first;
-      if (count > 0) tasks.push({ label: `${plural(count, 'question')} · ${skill.name}`, minutes: Math.ceil(count * 1.2), done: false, run: () => practiceSkill(skill.section, skill.name) });
+      if (count > 0) tasks.push({ label: `${plural(count, 'question')} · ${skillLabel(skill.name)}`, minutes: Math.ceil(count * 1.2), done: false, run: () => practiceSkill(skill.section, skill.name) });
     });
   } else {
     const section = exam.sections[0];
@@ -1605,7 +1668,7 @@ function todaysPlan() {
 }
 
 function viewHome() {
-  if (test?.finished) test = null;
+  if (test?.finished) { test = null; saveTest(); }
   const days = daysUntilTest();
   const tasks = todaysPlan();
   const next = tasks.find(t => !t.done);
@@ -1631,7 +1694,7 @@ function viewHome() {
           </li>`).join('')}</ul>
         </section>
         ${skillsTableHtml()}
-        <p class="hint">Mastery is your estimated chance of answering a Medium question in that skill correctly. Scores are estimates, not official ${exam.maker} scores. ${progress.profile.mode === 'grade' ? `Starting level: ${gradeName(progress.profile.grade).toLowerCase()}` : 'Starting level: placement test'} · <a href="#/start">change</a></p>
+        <p class="hint">Mastery is your estimated chance of answering ${levelName('Medium') === 'Medium' ? 'a Medium' : `an ${levelName('Medium')}`} question in that skill correctly. Scores are estimates, not official ${exam.maker} scores. ${progress.profile.mode === 'grade' ? `Starting level: ${gradeName(progress.profile.grade).toLowerCase()}` : 'Starting level: placement test'} · <a href="#/start">change</a></p>
       </div>
       <aside class="ws-rail" aria-label="At a glance">${railHtml(days)}</aside>
     </div>`;
@@ -1671,12 +1734,12 @@ function skillsTableHtml() {
       <div class="table-wrap"><table class="skills-table stack">
         <thead><tr>${th('skill', 'Skill')}${showSection ? '<th>Section</th>' : ''}${th('mastery', 'Mastery')}${th('accuracy', 'Accuracy', 'num')}${th('answered', 'Answered', 'num')}<th><span class="visually-hidden">Practice</span></th></tr></thead>
         <tbody>${rows.length ? rows.map(r => `<tr>
-          <td>${esc(r.name)}</td>
+          <td>${esc(skillLabel(r.name))}</td>
           ${showSection ? `<td data-label="Section">${esc(r.sectionShort)}</td>` : ''}
           <td data-label="Mastery">${r.mastery == null ? '<span class="muted">not started</span>' : `<span class="mastery"><span class="track"><span class="fill ${masteryClass(r.mastery)}" style="width:${Math.round(r.mastery * 100)}%"></span></span><span class="pct">${Math.round(r.mastery * 100)}%</span></span>`}</td>
           <td class="num" data-label="Accuracy">${r.accuracy == null ? '—' : `${Math.round(r.accuracy * 100)}%`}</td>
           <td class="num" data-label="Answered">${r.answered}</td>
-          <td class="num"><button type="button" class="small" data-skill="${esc(r.name)}" data-section="${r.section}" aria-label="Practice ${esc(r.name)}">Practice</button></td>
+          <td class="num"><button type="button" class="small" data-skill="${esc(r.name)}" data-section="${r.section}" aria-label="Practice ${esc(skillLabel(r.name))}">Practice</button></td>
         </tr>`).join('') : '<tr><td colspan="6" class="muted">No skills with questions yet.</td></tr>'}</tbody>
       </table></div>
     </section>`;
@@ -1723,12 +1786,12 @@ function railHtml(days) {
       <h2 class="rail-label">${totalLabel()}</h2>
       ${total ? `<p class="rail-big">${total.mid}<small>likely ${range(total)}</small></p>
         <p class="hint">${target ? (total.mid >= target ? `At or above your ${target} target` : `${plural(target - total.mid, 'point')} to your ${target} target`) : '<a href="#/plan">Set a target</a>'}</p>`
-        : '<p class="hint">Answer a few questions in every section to see an estimate.</p>'}
+        : `<p class="hint">${totalWaitingNote() ?? 'Answer a few questions in every section to see an estimate.'}</p>`}
       <a class="rail-link" href="#/scores">See scores</a>
     </section>
     <section class="rail-card">
       <h2 class="rail-label">Review queue</h2>
-      ${queue.length ? `<ul class="queue">${queue.map(([id, m]) => `<li><span>${esc(byId.get(id).skill)}</span><span>${dueLabel(m.due)}</span></li>`).join('')}</ul>`
+      ${queue.length ? `<ul class="queue">${queue.map(([id, m]) => `<li><span>${esc(skillLabel(byId.get(id).skill))}</span><span>${dueLabel(m.due)}</span></li>`).join('')}</ul>`
         : '<p class="hint">Nothing to review. Questions you miss land here.</p>'}
     </section>
     <section class="rail-card">
@@ -1758,7 +1821,7 @@ function viewScores() {
         ${total ? `<p class="hero-score">${total.mid}</p>
           <p class="muted">likely ${range(total)}${target ? ` · ${total.mid >= target ? 'at or above your target' : `${plural(target - total.mid, 'point')} to your ${target} target`}` : ''}</p>
           ${scaleHtml(total, target)}`
-          : `<p class="hero-empty">Not enough answers yet</p><p class="muted">Answer at least five questions in each of ${scoredSections(exam).map(s => s.name).join(', ')}, or take the placement test, to see an estimate.</p>`}
+          : `<p class="hero-empty">${totalWaitingNote() ? 'Not available yet' : 'Not enough answers yet'}</p><p class="muted">${totalWaitingNote() ?? `Answer at least five questions in each of ${listNames(scoredSections(exam).map(s => s.name))}, or take the placement test, to see an estimate.`}</p>`}
       </div>
       ${trendHtml(history, target)}
     </section>
@@ -1844,6 +1907,13 @@ function viewLearn(id) {
   const lesson = lessonsHere().find(l => l.id === id);
   if (lesson) return viewLesson(lesson);
   const lessons = lessonsHere();
+  if (!lessons.length) {
+    const withLessons = EXAM_IDS.filter(id => LESSONS[id]?.length);
+    view.innerHTML = `${pageHead('Lessons', { eyebrow: exam.long })}
+      <div class="empty"><h2>No ${exam.name} lessons yet</h2><p>Lessons are written a test at a time, and so far only the ${listNames(withLessons.map(id => EXAMS[id].name))} has them.</p>
+        <div class="actions">${withLessons.map(id => `<button class="primary" data-exam="${id}">Switch to ${EXAMS[id].name}</button>`).join('')}<a class="button" href="#/home">Dashboard</a></div></div>`;
+    return;
+  }
   view.innerHTML = `
     ${pageHead('Lessons', { eyebrow: exam.long })}
     <p class="muted">A short lesson for each topic on the ${exam.name}, with a worked example, then questions to check
@@ -2029,7 +2099,7 @@ function viewPlan() {
   const estimates = scoredSections(exam).map(s => [s, sectionEstimate(s.id)]).filter(([, e]) => e);
   const weakerSection = estimates.length === scoredSections(exam).length && estimates.length > 1
     ? estimates.sort((a, b) => a[1].mid - b[1].mid)[0][0] : null;
-  const step = exam.total.kind === 'sum' ? 10 : 1;
+  const step = exam.scale.step;
 
   view.innerHTML = `
     ${pageHead('Study plan', { eyebrow: exam.long })}
@@ -2044,7 +2114,7 @@ function viewPlan() {
       <div class="card">
         <h2>Where you stand</h2>
         <p>${days == null ? 'No test date set.' : days >= 0 ? `<strong>${plural(days, 'day')}</strong> until test day.` : 'Your test date has passed.'}</p>
-        <p>${total ? `${totalLabel()} <strong>${total.mid}</strong> (likely ${range(total)}).` : `Practice every section to get an ${totalLabel().toLowerCase()}.`}</p>
+        <p>${total ? `${totalLabel()} <strong>${total.mid}</strong> (likely ${range(total)}).` : totalWaitingNote() ?? `Practice every section to get an ${totalLabel().toLowerCase()}.`}</p>
         ${gap != null ? `<p>${gap > 0 ? `About <strong>${plural(gap, 'point')}</strong> to your target.` : 'Your estimate is at or above your target. Keep it steady.'}</p>` : ''}
       </div>
     </div>
@@ -2114,7 +2184,7 @@ function viewLibrary() {
     ${pageHead('Question library', { eyebrow: exam.long })}
     ${source}
     ${originalsNote}
-    <p class="hint">Have question PDFs of your own? You can ${importLink} — they are read on this device and stay on it.</p>
+    ${['cb', 'act'].includes(exam.source) ? `<p class="hint">Have question PDFs of your own? You can ${importLink} — they are read on this device and stay on it.</p>` : ''}
     ${sharedLibraryCard()}
     ${library.warnings.length ? `<div class="card"><h2>Skipped questions</h2>${library.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}</div>` : ''}
     <div class="card">
@@ -2448,7 +2518,7 @@ function viewSettings() {
     const now = Date.now();
     replaceProgress(examId, { ...store.defaultProgress(), resetAt: now, stamps: { profile: now, placement: now, plan: now } }, { push: true });
     session = null;
-    if (test?.exam === examId) test = null;
+    if (test?.exam === examId) { test = null; saveTest(); }
     toast(`${exam.name} progress reset`);
     go('start');
   });
@@ -2526,13 +2596,27 @@ const RESOURCES = {
       BIGFUTURE,
     ] },
   ],
+  mcat: [
+    { title: 'From the AAMC, which makes the MCAT', links: [
+      link('Prepare for the MCAT exam', 'https://students-residents.aamc.org/prepare-mcat-exam/prepare-mcat-exam', 'The AAMC’s own prep hub, including its practice exams. Log your scores from those on the Scores page here.'),
+      link('Free planning and study resources', 'https://students-residents.aamc.org/prepare-mcat-exam/free-planning-and-study-resources', 'The free official material: sample questions, planning tools and more.'),
+      link('What’s on the MCAT exam?', 'https://students-residents.aamc.org/whats-mcat-exam/publication-chapters/whats-mcat-exam', 'The official outline of every section, concept and content category, which this app’s topics follow.'),
+      link('Creating your MCAT study plan', 'https://students-residents.aamc.org/prepare-mcat-exam/creating-your-mcat-exam-study-plan', 'The AAMC’s guide to planning your preparation.'),
+      link('The MCAT score scale', 'https://students-residents.aamc.org/mcat-scores/mcat-exam-score-scale', 'How the 118–132 section scores and the 472–528 total work.'),
+      link('MCAT Essentials for 2026', 'https://students-residents.aamc.org/register-mcat-exam/publication/mcat-essentials-testing-year-2026', 'Registration, test-day rules and scoring for this testing year.'),
+    ] },
+    { title: 'Learn the science', links: [
+      link('Khan Academy: MCAT', 'https://www.khanacademy.org/test-prep/mcat', 'Free videos and questions across all four sections, made with the AAMC.'),
+      link('OpenStax science textbooks', 'https://openstax.org/subjects/science', 'Free, openly licensed textbooks in biology, chemistry, physics, psychology and sociology. The lessons here link to their chapters.'),
+    ] },
+  ],
 };
 
 function viewResources() {
   view.innerHTML = `
     ${pageHead('Resources', { eyebrow: exam.long })}
     <p class="muted">Official ${exam.maker} tools and other free places to prepare for the ${exam.long}. Links open in a new tab.</p>
-    <div class="cards">${RESOURCES[examId].map(group => `
+    <div class="cards">${(RESOURCES[examId] ?? []).map(group => `
       <section class="card">
         <h2>${esc(group.title)}</h2>
         <ul class="links">${group.links.map(({ title, url, about }) => {
@@ -2572,7 +2656,7 @@ function viewAccount() {
           <button id="sign-out">Sign out</button>
           <button class="danger" id="sign-out-clear">Sign out and clear this device</button>
         </div>
-        <p class="hint">Signing out keeps a copy of your progress on this device. On a shared computer, use “Sign out and clear this device.”</p>
+        <p class="hint">Signing out keeps a copy of your progress on this device, but it is never added to a different account that signs in here. On a shared computer, “Sign out and clear this device” removes it straight away.</p>
       </div>`;
     on('#sign-out', 'click', () => signOutOfSync());
     confirmButton('#sign-out-clear', 'Click again to sign out and clear', async () => {
@@ -2580,6 +2664,7 @@ function viewAccount() {
       EXAM_IDS.forEach(id => replaceProgress(id, store.defaultProgress()));
       session = null;
       test = null;
+      saveTest();
       go('start');
     });
     return;
@@ -2666,6 +2751,7 @@ function applyLibrary() {
   }
   allQuestions = [...byId.values()];
   choosePool();
+  restoreTest();
 }
 
 // The library arriving changes what practice can serve, so pages that count questions have to catch
@@ -2767,6 +2853,21 @@ loadLibrary().then(result => {
       // Quietly, because progress arriving from another device is not navigation the reader asked for.
       if (!session && ['home', 'scores', 'review', 'account'].includes(currentRoute)) render({ quiet: true });
       else renderNav(currentRoute);
+    },
+    // Progress on this device is added to the account that signs in, which is what someone who studied here
+    // before signing up wants. But after a plain "Sign out" the device still holds that account's progress, and
+    // on a shared computer the next person to sign in would have it merged into theirs. So the device
+    // remembers which account it last synced with, and a different one starts from a clean slate.
+    onSignIn: uid => {
+      let last = null;
+      try { last = localStorage.getItem(LAST_ACCOUNT_KEY); } catch { /* storage unavailable */ }
+      if (last && last !== uid) {
+        EXAM_IDS.forEach(id => replaceProgress(id, store.defaultProgress()));
+        session = null;
+        test = null;
+        saveTest();
+      }
+      try { localStorage.setItem(LAST_ACCOUNT_KEY, uid); } catch { /* storage unavailable */ }
     },
     onChange: state => {
       if (state.account && state.phase === 'synced' && lastPhase === 'syncing' && !state.lastSyncedToastShown) toast('Synced');
