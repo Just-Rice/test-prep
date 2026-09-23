@@ -847,3 +847,6 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
    kept scrollable rather than shrunk to the width of a phone, where it would be unreadable. */
 .passage-image { max-height: 60vh; overflow: auto; background: var(--surface-2); border-radius: 10px; padding: 8px; }
 .passage-image .qimg { margin: 0 auto; }
+
+/* Where a hint button would be for someone signed out: Gemini only answers signed-in students. */
+.hint-signin { align-self: center; font-weight: 600; color: var(--muted); }

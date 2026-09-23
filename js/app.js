@@ -660,7 +660,11 @@ function bindReasonPicker(qid) {
 // ---------- hints and explanations from Gemini ----------
 
 // Available only when Firebase is configured and the student hasn't turned it off in Settings.
-const aiReady = () => explainConfigured && settings.explain === 'on';
+// Gemini answers signed-in students only: Firebase AI Logic's authenticated-users mode is enforced, so a request
+// from someone signed out is refused. Rather than a button that can only fail, they get a link to sign in.
+const signedIn = () => syncConfigured && Boolean(syncState().account);
+const aiReady = () => explainConfigured && settings.explain === 'on' && signedIn();
+const aiNeedsSignIn = () => explainConfigured && settings.explain === 'on' && syncConfigured && !signedIn();
 
 const aiNoteHtml = () => (aiReady() ? '<div class="ai-note" hidden></div>' : '');
 
@@ -703,6 +707,7 @@ function renderDrill(headerHtml, source, rerender) {
       : st.revealed ? '<button class="primary" id="next">Next question</button>'
       : `<button class="primary" id="check" ${st.selected == null ? 'disabled' : ''}>Check answer</button>`}
       ${aiReady() && !st.revealed ? '<button class="ghost small" id="hint">Give me a hint</button>' : ''}
+      ${aiNeedsSignIn() && !st.revealed ? '<a class="small hint-signin" href="#/account">Sign in for hints</a>' : ''}
       ${aiReady() && st.revealed && st.correct != null ? '<button class="ghost small" id="explain">Explain this</button>' : ''}
     </div>
     ${aiNoteHtml()}`;
@@ -2314,7 +2319,7 @@ const SETTING_GROUPS = [
   ['textsize', 'Text size', 'Scales the questions, passages and everything else.'],
   ['contrast', 'Contrast', 'Turn this up if text or borders are hard to make out.'],
   ['motion', 'Animation', 'How much the app moves as pages and answers appear.'],
-  ['explain', 'Explain with AI', 'A hint before you answer, and an explanation afterwards, written by Google’s Gemini. Questions you ask about are sent to Google.'],
+  ['explain', 'Explain with AI', 'A hint before you answer, and an explanation afterwards, written by Google’s Gemini. You need to be signed in to use it. Questions you ask about are sent to Google.'],
   ['questions', 'Questions written for this app', 'Alongside the official College Board and ACT questions there are 400 SAT-style ones written for this app, each answer checked by a test. Your progress on them is kept either way.'],
 ];
 
