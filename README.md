@@ -2,7 +2,7 @@
 
 An adaptive study app for the SAT, PSAT and ACT that runs entirely in the browser.
 
-**Live site: https://just-rice.github.io/sat-prep/**
+**Live site: https://just-rice.github.io/test-prep/**
 
 - **Four tests, each with its own progress:** the SAT, PSAT/NMSQT and PSAT 10, PSAT 8/9, and the ACT
 - **Placement test** that adapts question difficulty as you answer, or a grade-level starting point

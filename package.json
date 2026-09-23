@@ -1,5 +1,5 @@
 {
-  "name": "sat-prep",
+  "name": "test-prep",
   "version": "1.0.0",
   "description": "Adaptive SAT, PSAT and ACT study app: placement testing, targeted practice, timed practice tests in each test's format, mistake review with spaced repetition, a study dashboard and cloud sync.",
   "scripts": {
@@ -10,13 +10,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Just-Rice/sat-prep.git"
+    "url": "git+https://github.com/Just-Rice/test-prep.git"
   },
-  "homepage": "https://just-rice.github.io/sat-prep/",
+  "homepage": "https://just-rice.github.io/test-prep/",
   "bugs": {
-    "url": "https://github.com/Just-Rice/sat-prep/issues"
+    "url": "https://github.com/Just-Rice/test-prep/issues"
   },
-  "keywords": ["sat", "sat-prep", "adaptive-learning", "education"],
+  "keywords": ["sat", "psat", "act", "mcat", "test-prep", "adaptive-learning", "education"],
   "author": "",
   "license": "ISC",
   "type": "module",
