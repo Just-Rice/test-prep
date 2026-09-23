@@ -9,6 +9,7 @@ import { applySettings, CHOICES, loadSettings, saveSettings } from './settings.j
 import { explainConfigured, explainQuestion, hintFor } from './explain.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
 import { ORIGINAL_QUESTIONS } from './questions/index.js';
+import { MCAT_CP_LESSONS } from './lessons/mcat-cp.js';
 import { mountCalculator } from './calc.js';
 import { currentStreak, dayKey, longestStreak } from './streak.js';
 import {
@@ -223,7 +224,7 @@ function snippet(q) {
   if (!text) {
     // Nothing distinctive to show, so name what the question is about instead of repeating its boilerplate.
     const kind = q.promptImage ? 'Diagram or equation' : 'Question';
-    return `${kind} · ${q.skill}${q.difficulty ? ` · ${q.difficulty}` : ''}`;
+    return `${kind} · ${skillLabel(q.skill)}${q.difficulty ? ` · ${levelName(q.difficulty)}` : ''}`;
   }
   return text.length > 90 ? `${text.slice(0, 90)}…` : text;
 }
@@ -313,6 +314,7 @@ const ROUTES = {
   test: [viewTest, 'Practice test'], review: [viewReview, 'Review'], mistakes: [viewMistakes, 'Mistakes'],
   plan: [viewPlan, 'Study plan'], library: [viewLibrary, 'Library'], resources: [viewResources, 'Resources'],
   settings: [viewSettings, 'Settings'], account: [viewAccount, 'Account'], import: [viewImport, 'Your own questions'],
+  learn: [viewLearn, 'Lessons'],
 };
 
 // quiet: this redraw is not a reader's own navigation but the page catching up with something that
@@ -330,7 +332,7 @@ function render({ quiet = false } = {}) {
   setMore(false);
   closePalette();
   if (!pool.length && ['practice', 'test', 'placement', 'placed'].includes(route)) return go('library');
-  if (!progress.profile.mode && !['library', 'resources', 'settings', 'start', 'placement', 'placed', 'account'].includes(route)) return go('start');
+  if (!progress.profile.mode && !['library', 'resources', 'settings', 'start', 'placement', 'placed', 'account', 'learn'].includes(route)) return go('start');
   if (session && !sessionBelongsTo(route)) session = null;
   document.title = `${ROUTES[route][1]} · ${exam.name} · ${APP_NAME}`;
   renderNav(route);
@@ -366,6 +368,7 @@ const ICONS = {
   flame: '<path d="M12 21c-3.9 0-7-2.8-7-6.6 0-2.9 1.9-5 3.6-6.8.6 2 1.8 3 3 3.4-.5-3.1.9-6 3.4-8 .4 3 2 4.6 3.3 6.3 1 1.4 1.7 3 1.7 5.1 0 3.8-3.1 6.6-7 6.6z"/>',
   more: '<circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/>',
   mistakes: '<path d="M12 4.5 20.5 19.5H3.5z"/><path d="M12 10v4M12 17h.01"/>',
+  learn: '<path d="M4 5.5c2.7-1.1 5.3-.8 8 1 2.7-1.8 5.3-2.1 8-1V19c-2.7-1.1-5.3-.8-8 1-2.7-1.8-5.3-2.1-8-1z"/><path d="M12 6.5V20"/>',
   settings: '<circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v2M12 18.5v2M20.5 12h-2M5.5 12h-2M18 6l-1.4 1.4M7.4 16.6 6 18M18 18l-1.4-1.4M7.4 7.4 6 6"/>',
 };
 const icon = name => `<svg class="icon icon-${name}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -407,7 +410,7 @@ function renderNav(active) {
   const badge = r => (r === 'review' && due ? `<span class="badge">${due}</span>`
     : r === 'test' && testRunning ? '<span class="badge live">In progress</span>' : '');
 
-  const links = [['home', 'Dashboard'], ['scores', 'Scores'], ['practice', 'Practice'], ['test', 'Practice test'],
+  const links = [['home', 'Dashboard'], ['scores', 'Scores'], ['practice', 'Practice'], ...(lessonsHere().length ? [['learn', 'Lessons']] : []), ['test', 'Practice test'],
     ['review', 'Review'], ['mistakes', 'Mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
     ['resources', 'Resources'], ['settings', 'Settings']];
   // Collapsed, the sidebar is a strip of icons; names move into tooltips and accessible labels.
@@ -433,7 +436,7 @@ function renderNav(active) {
     ${sync ? `<a class="top-sync" href="#/account" aria-label="${syncText}"><i class="dot ${syncDot}"></i></a>` : ''}`;
 
   const tabLinks = [['home', 'Home'], ['practice', 'Practice'], ['test', 'Test'], ['review', 'Review']];
-  const moreLinks = [['scores', 'Scores'], ['mistakes', 'Mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
+  const moreLinks = [['scores', 'Scores'], ...(lessonsHere().length ? [['learn', 'Lessons']] : []), ['mistakes', 'Mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
     ['resources', 'Resources'], ['settings', 'Settings'], ...(sync ? [['account', sync.account ? 'Account' : 'Sign in']] : [])];
   const inMore = moreLinks.some(([r]) => r === active);
   tabs.innerHTML = `${tabLinks.map(([r, label]) => `<a href="#/${r}"${current(r)}>${icon(r)}<span>${label}</span>${badge(r)}</a>`).join('')}
@@ -455,13 +458,13 @@ function setMore(open) {
 
 // "Jump to": search pages, the current test's skills, and the other tests.
 function paletteItems() {
-  const pages = [['home', 'Dashboard'], ['scores', 'Scores'], ['practice', 'Practice'], ['test', 'Practice test'],
+  const pages = [['home', 'Dashboard'], ['scores', 'Scores'], ['practice', 'Practice'], ...(lessonsHere().length ? [['learn', 'Lessons']] : []), ['test', 'Practice test'],
     ['review', 'Review'], ['mistakes', 'Mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
     ['resources', 'Resources'], ['settings', 'Settings'], ...(syncConfigured ? [['account', 'Account']] : [])]
     .map(([route, label]) => ({ label, hint: 'Page', href: `#/${route}` }));
   const skills = exam.sections.flatMap(s => skillsOf(exam, s.id)
     .filter(k => pool.some(q => q.section === s.id && q.skill === k.name))
-    .map(k => ({ label: k.name, hint: `Practice · ${s.name}`, skill: k.name, section: s.id })));
+    .map(k => ({ label: skillLabel(k.name), hint: `Practice · ${s.name}`, skill: k.name, section: s.id })));
   const tests = EXAM_IDS.filter(id => id !== examId).map(id => ({ label: `Switch to ${EXAMS[id].long}`, hint: 'Test', exam: id }));
   return [...pages, ...skills, ...tests];
 }
@@ -594,7 +597,7 @@ function questionHtml(q, st = {}) {
   }
   const original = st.revealed && q.original
     ? `<details class="original"><summary>View the original from the export</summary>${imgHtml(q.original, 'The original question')}</details>` : '';
-  const meta = st.hideMeta ? '' : `<div class="meta">${esc(q.domain)} · ${esc(q.skill)}${q.difficulty ? ` · ${esc(q.difficulty)}` : ''}${q.source === 'demo' ? ' · demo' : ''}</div>`;
+  const meta = st.hideMeta ? '' : `<div class="meta">${esc(q.domain)} · ${esc(skillLabel(q.skill))}${q.difficulty ? ` · ${esc(levelName(q.difficulty))}` : ''}${q.source === 'demo' ? ' · demo' : ''}</div>`;
   return `<article class="question${reading ? ' split' : ''}">${meta}${reading}<div class="q-work">${prompt}${answer}${feedback}${original}</div></article>`;
 }
 
@@ -736,9 +739,21 @@ function renderDrill(headerHtml, source, rerender) {
 
 const importLink = '<a href="#/import">add question PDFs of your own</a>';
 
+// How a difficulty and a starting year read on this test: the MCAT calls its tiers Foundation, Intermediate and
+// Exam-level, and is taken in college rather than a school grade.
+const levelName = level => exam.levelNames?.[level] ?? level;
+// A skill's short name where it has one (the MCAT's official titles are too long to list); the full name
+// stays the key that questions are filed under.
+const SKILL_LABELS = new Map(EXAM_IDS.flatMap(id => EXAMS[id].domains.flatMap(d => d.skills.filter(k => k.short).map(k => [k.name, k.short]))));
+const skillLabel = name => SKILL_LABELS.get(name) ?? name;
+const gradeName = grade => exam.gradeNames?.[grade] ?? `Grade ${grade}`;
+// A section's name where there is room for it; the MCAT's run to fifty characters, too long for a tab.
+const sectionTab = s => (s.name.length > 30 ? s.short : s.name);
+
 function addQuestionsHint() {
   // ACT questions come from ACT's own practice test booklets, which carry a scoring key at the back;
   // without that key a booklet has no answers and no reporting categories, so it cannot be read.
+  if (exam.id === 'mcat') return 'MCAT questions are written for this app a section at a time, and more are on the way';
   return exam.source === 'act'
     ? `${importLink}, or save ACT practice test booklets, with the scoring keys at the back, in the <code>exports/act</code> folder and restart the app`
     : `${importLink}, or save ${exam.long} exports from the College Board Question Bank in the <code>exports</code> folder and restart the app`;
@@ -758,11 +773,13 @@ function viewStart() {
         <button class="primary" id="placement" ${pool.length ? '' : 'disabled'}>Start placement test</button>
       </div>
       <div class="card">
-        <h2>Choose your grade</h2>
-        <p>Start at a typical level for your grade. Skills usually taught in later courses are held back until you take the placement test.</p>
+        <h2>${exam.gradeNames ? 'Choose your year' : 'Choose your grade'}</h2>
+        <p>${exam.gradeNames
+          ? `Start at a typical level for where you are in college. Every topic is open from the start, because the ${exam.name} assumes the introductory science courses.`
+          : 'Start at a typical level for your grade. Skills usually taught in later courses are held back until you take the placement test.'}</p>
         <div class="actions">
-          <select id="grade" aria-label="Grade">${exam.grades.map(g => `<option value="${g}" ${progress.profile.grade === g ? 'selected' : ''}>Grade ${g}</option>`).join('')}</select>
-          <button id="use-grade">Use this grade</button>
+          <select id="grade" aria-label="${exam.gradeNames ? 'Year' : 'Grade'}">${exam.grades.map(g => `<option value="${g}" ${progress.profile.grade === g ? 'selected' : ''}>${gradeName(g)}</option>`).join('')}</select>
+          <button id="use-grade">${exam.gradeNames ? 'Use this year' : 'Use this grade'}</button>
         </div>
       </div>
     </div>
@@ -896,15 +913,15 @@ function viewPractice(arg) {
   const levels = new Set(pool.filter(q => q.section === section).map(q => q.difficulty));
   const levelPicker = levels.size > 1 ? `
       <select id="level" aria-label="Difficulty">
-        ${CHOICES.level.map(([value, label]) => `<option value="${value}" ${settings.level === value ? 'selected' : ''}>${value === 'adaptive' ? `Difficulty: ${label.toLowerCase()}` : label}</option>`).join('')}
+        ${CHOICES.level.map(([value, label]) => `<option value="${value}" ${settings.level === value ? 'selected' : ''}>${value === 'adaptive' ? `Difficulty: ${label.toLowerCase()}` : levelName(value)}</option>`).join('')}
       </select>` : '';
   const header = `
-    ${pageHead('Practice', { eyebrow: `${exam.long} · ${settings.level === 'adaptive' || levels.size < 2 ? 'adaptive practice' : `${settings.level.toLowerCase()} questions`}` })}
+    ${pageHead('Practice', { eyebrow: `${exam.long} · ${settings.level === 'adaptive' || levels.size < 2 ? 'adaptive practice' : `${levelName(settings.level).toLowerCase()} questions`}` })}
     <div class="bar">
-      <div class="seg">${exam.sections.map(s => `<a href="#/practice/${s.id}" class="${s.id === section ? 'active' : ''}">${s.name}</a>`).join('')}</div>
+      <div class="seg">${exam.sections.map(s => `<a href="#/practice/${s.id}" class="${s.id === section ? 'active' : ''}">${sectionTab(s)}</a>`).join('')}</div>
       <select id="skill" aria-label="Skill">
         <option value="">Adaptive: focus on weak spots</option>
-        ${skills.map(s => `<option ${s.name === session.skill ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+        ${skills.map(s => `<option value="${esc(s.name)}" ${s.name === session.skill ? 'selected' : ''}>${esc(skillLabel(s.name))}</option>`).join('')}
       </select>${levelPicker}
       <span class="tally">${session.correct}/${session.done} this session · ${answeredToday()}/${progress.plan.dailyGoal} today</span>
     </div>`;
@@ -951,7 +968,7 @@ function viewReview(arg) {
       <thead><tr><th>Question</th><th>Skill</th><th>Difficulty</th><th>Reason</th><th>Next review</th></tr></thead>
       <tbody>${entries.map(([id, m]) => {
         const q = byId.get(id);
-        return `<tr><td>${esc(snippet(q))}</td><td data-label="Skill">${esc(q.skill)}</td><td data-label="Difficulty">${esc(q.difficulty || '—')}</td><td data-label="Reason">${esc(m.reason || '—')}</td><td data-label="Next review">${m.due <= Date.now() ? 'Now' : new Date(m.due).toLocaleDateString()}</td></tr>`;
+        return `<tr><td>${esc(snippet(q))}</td><td data-label="Skill">${esc(skillLabel(q.skill))}</td><td data-label="Difficulty">${esc(q.difficulty ? levelName(q.difficulty) : '—')}</td><td data-label="Reason">${esc(m.reason || '—')}</td><td data-label="Next review">${m.due <= Date.now() ? 'Now' : new Date(m.due).toLocaleDateString()}</td></tr>`;
       }).join('')}</tbody></table></div></div>` : ''}`;
   on('#go', 'click', () => go('review/go'));
 }
@@ -1038,7 +1055,7 @@ function viewMistakes(arg) {
             <summary>
               <span class="mistake-head">
                 <span class="mistake-title">${esc(snippet(q))}</span>
-                <span class="mistake-meta">${esc(q.skill)}${q.difficulty ? ` · ${esc(q.difficulty)}` : ''}${m.lapses > 1 ? ` · missed ${plural(m.lapses, 'time')}` : ''}${m.reason ? ` · ${esc(m.reason)}` : ''}</span>
+                <span class="mistake-meta">${esc(skillLabel(q.skill))}${q.difficulty ? ` · ${esc(levelName(q.difficulty))}` : ''}${m.lapses > 1 ? ` · missed ${plural(m.lapses, 'time')}` : ''}${m.reason ? ` · ${esc(m.reason)}` : ''}</span>
               </span>
               ${state}
             </summary>
@@ -1146,7 +1163,7 @@ function viewTest() {
     ${progress.tests.length ? `<div class="card"><h2>Past tests</h2><div class="table-wrap"><table class="stack">
       <thead><tr><th>Date</th><th>Test</th>${scored.map(s => `<th>${s.name}</th>`).join('')}<th>${totalLabel()}</th></tr></thead>
       <tbody>${[...progress.tests].reverse().map(t => `<tr><td>${new Date(t.at).toLocaleDateString()}</td><td data-label="Test">${esc(t.kind)}</td>
-        ${scored.map(s => `<td data-label="${s.name}">${t.summary[s.id] ? `${t.summary[s.id].score.mid} <span class="muted">(${t.summary[s.id].correct}/${t.summary[s.id].total})</span>` : '—'}</td>`).join('')}
+        ${scored.map(s => `<td data-label="${s.name}">${t.summary[s.id] ? `${t.summary[s.id].score.mid}${t.summary[s.id].total ? ` <span class="muted">(${t.summary[s.id].correct}/${t.summary[s.id].total})</span>` : ''}` : '—'}</td>`).join('')}
         <td data-label="${totalLabel()}">${t.total ? t.total.mid : '—'}</td></tr>`).join('')}</tbody>
     </table></div></div>` : ''}`;
   on('[data-test]', 'click', e => startTest(e.currentTarget.dataset.test));
@@ -1450,7 +1467,7 @@ function testResults() {
       if (!q) return '';
       const where = `${sectionShort(r.section)}${sectionOf(exam, r.section).modules > 1 ? ` M${r.module}` : ''}`;
       return `<details class="review-item"><summary><span class="${r.correct ? 'mark-ok' : 'mark-bad'}">${r.correct ? '✓' : '✗'}</span>
-        <span>${i + 1}. ${where} · ${esc(q.skill)}${q.difficulty ? ` · ${q.difficulty}` : ''}${r.choice == null ? ' · <span class="warn">unanswered</span>' : ''}</span></summary>
+        <span>${i + 1}. ${where} · ${esc(skillLabel(q.skill))}${q.difficulty ? ` · ${levelName(q.difficulty)}` : ''}${r.choice == null ? ' · <span class="warn">unanswered</span>' : ''}</span></summary>
         ${questionHtml(q, { selected: r.choice, revealed: true, correct: r.correct, hideMeta: true })}</details>`;
     }).join('')}
     <div class="actions"><button class="primary" id="done">Done</button></div>`;
@@ -1545,7 +1562,7 @@ function viewHome() {
           </li>`).join('')}</ul>
         </section>
         ${skillsTableHtml()}
-        <p class="hint">Mastery is your estimated chance of answering a Medium question in that skill correctly. Scores are estimates, not official ${exam.maker} scores. ${progress.profile.mode === 'grade' ? `Starting level: grade ${progress.profile.grade}` : 'Starting level: placement test'} · <a href="#/start">change</a></p>
+        <p class="hint">Mastery is your estimated chance of answering a Medium question in that skill correctly. Scores are estimates, not official ${exam.maker} scores. ${progress.profile.mode === 'grade' ? `Starting level: ${gradeName(progress.profile.grade).toLowerCase()}` : 'Starting level: placement test'} · <a href="#/start">change</a></p>
       </div>
       <aside class="ws-rail" aria-label="At a glance">${railHtml(days)}</aside>
     </div>`;
@@ -1684,21 +1701,122 @@ function viewScores() {
     </div>
     <div class="section-scores">${exam.sections.map(s => {
       const estimate = sectionEstimate(s.id);
-      return `<div class="kpi"><span class="eyebrow">${s.name}${s.optional ? ' · optional' : ''}</span>${estimate ? `<strong>${estimate.mid}</strong><span class="muted">likely ${range(estimate)}</span>` : '<span class="muted">Not enough answers yet</span>'}</div>`;
+      return `<div class="kpi"><span class="eyebrow">${sectionTab(s)}${s.optional ? ' · optional' : ''}</span>${estimate ? `<strong>${estimate.mid}</strong><span class="muted">likely ${range(estimate)}</span>` : '<span class="muted">Not enough answers yet</span>'}</div>`;
     }).join('')}</div>
     ${exam.id === 'psat' ? nationalMeritHtml() : ''}
+    ${exam.id === 'mcat' ? officialScoresHtml() : ''}
     <div class="skill-lists">${exam.sections.map(sec => {
       const skills = skillAbilities(progress, sec.id, exam).filter(s => s.answered)
         .map(s => ({ ...s, p: pCorrect(s.theta, DIFFICULTY_B.Medium) })).sort((a, b) => a.p - b.p);
       return `<section class="card">
         <header class="card-head"><h2>${sec.name}</h2><span class="muted">weakest first</span></header>
-        ${skills.length ? `<ul class="skill-list">${skills.map(s => `<li><span>${esc(s.name)}</span><span class="mastery-chip ${masteryClass(s.p)}"><i aria-hidden="true"></i>${masteryName(s.p)} · ${Math.round(s.p * 100)}%</span><button type="button" class="small ghost" data-skill="${esc(s.name)}" data-section="${sec.id}" aria-label="Practice ${esc(s.name)}">Practice</button></li>`).join('')}</ul>`
+        ${skills.length ? `<ul class="skill-list">${skills.map(s => `<li><span>${esc(skillLabel(s.name))}</span><span class="mastery-chip ${masteryClass(s.p)}"><i aria-hidden="true"></i>${masteryName(s.p)} · ${Math.round(s.p * 100)}%</span><button type="button" class="small ghost" data-skill="${esc(s.name)}" data-section="${sec.id}" aria-label="Practice ${esc(skillLabel(s.name))}">Practice</button></li>`).join('')}</ul>`
           : '<p class="muted">No answers in this section yet.</p>'}
       </section>`;
     }).join('')}</div>
     <p class="hint">Estimates come from your answers and each question's difficulty. They aren't official ${exam.maker} scores.</p>`;
   on('[data-skill]', 'click', e => practiceSkill(e.currentTarget.dataset.section, e.currentTarget.dataset.skill));
   bindTrend(history);
+  if (exam.id === 'mcat') bindOfficialScores();
+}
+
+// Scores from the AAMC's own practice exams. Their questions can't be brought into the app, but the scores can:
+// entered here they join the practice-test history, the trend chart and the study plan like any timed test.
+function officialScoresHtml() {
+  const logged = progress.tests.filter(t => t.official);
+  const scored = scoredSections(exam);
+  return `<section class="card official">
+      <header class="card-head"><h2>Official AAMC practice exams</h2><span class="muted">${logged.length ? plural(logged.length, 'exam') + ' logged' : 'none logged yet'}</span></header>
+      <p class="hint">Took one of the AAMC’s practice exams on its own site? Enter your section scores (${exam.scale.min}–${exam.scale.max}) to track them here.</p>
+      <form id="official-form" class="official-form">
+        ${scored.map(sec => `<label>${sec.short}<input type="number" id="official-${sec.id}" name="${sec.id}" min="${exam.scale.min}" max="${exam.scale.max}" step="1" required inputmode="numeric"></label>`).join('')}
+        <label>Exam<input type="text" id="official-name" name="name" maxlength="40" placeholder="e.g. Sample Test"></label>
+        <button type="submit" class="button">Add scores</button>
+      </form>
+      <p class="warn" id="official-error" role="alert"></p>
+      ${logged.length ? `<div class="table-wrap"><table class="stack">
+        <thead><tr><th>Date</th><th>Exam</th>${scored.map(sec => `<th class="num">${sec.short}</th>`).join('')}<th class="num">Total</th></tr></thead>
+        <tbody>${[...logged].reverse().map(t => `<tr><td>${new Date(t.at).toLocaleDateString()}</td><td data-label="Exam">${esc(t.kind)}</td>
+          ${scored.map(sec => `<td class="num" data-label="${sec.short}">${t.summary[sec.id]?.score.mid ?? '—'}</td>`).join('')}
+          <td class="num" data-label="Total"><strong>${t.total?.mid ?? '—'}</strong></td></tr>`).join('')}</tbody>
+      </table></div>` : ''}
+    </section>`;
+}
+
+function bindOfficialScores() {
+  on('#official-form', 'submit', e => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const scored = scoredSections(exam);
+    const scores = Object.fromEntries(scored.map(sec => [sec.id, Number(form.get(sec.id))]));
+    const bad = scored.find(sec => !Number.isInteger(scores[sec.id]) || scores[sec.id] < exam.scale.min || scores[sec.id] > exam.scale.max);
+    if (bad) { $('#official-error').textContent = `${bad.short} must be a whole number from ${exam.scale.min} to ${exam.scale.max}.`; return; }
+    const exact = v => ({ low: v, mid: v, high: v });
+    const name = String(form.get('name') || '').trim();
+    progress.tests.push({
+      id: `aamc-${Date.now()}`, at: Date.now(), official: true, kind: name ? `AAMC: ${name}` : 'AAMC practice exam',
+      summary: Object.fromEntries(scored.map(sec => [sec.id, { score: exact(scores[sec.id]) }])),
+      total: totalScore(exam, Object.fromEntries(scored.map(sec => [sec.id, exact(scores[sec.id])]))),
+      qids: [],
+    });
+    save();
+    toast('Scores added');
+    render({ quiet: true });
+  });
+}
+
+// ---------- lessons ----------
+
+// Short lessons, one per content category, for the tests that have them (so far the MCAT's Chem/Phys section).
+const LESSONS = { mcat: MCAT_CP_LESSONS.map(lesson => ({ ...lesson, section: 'CP' })) };
+const lessonsHere = () => LESSONS[examId] ?? [];
+
+function viewLearn(id) {
+  const lesson = lessonsHere().find(l => l.id === id);
+  if (lesson) return viewLesson(lesson);
+  const lessons = lessonsHere();
+  view.innerHTML = `
+    ${pageHead('Lessons', { eyebrow: exam.long })}
+    <p class="muted">A short lesson for each topic on the ${exam.name}, with a worked example, then questions to check
+      yourself. Each links to free textbooks and videos for more depth.</p>
+    ${exam.sections.map(sec => {
+      const here = lessons.filter(l => l.section === sec.id);
+      const abilities = new Map(skillAbilities(progress, sec.id, exam).map(s => [s.name, s]));
+      return `<section class="card lesson-list">
+        <header class="card-head"><h2>${sec.name}</h2><span class="muted">${here.length ? plural(here.length, 'lesson') : 'coming soon'}</span></header>
+        ${here.length ? `<ul>${here.map(l => {
+          const ability = abilities.get(l.skill);
+          const p = ability?.answered ? pCorrect(ability.theta, DIFFICULTY_B.Medium) : null;
+          return `<li><a href="#/learn/${l.id}"><span class="lesson-code">${esc(l.skill.split(':')[0])}</span><span>${esc(l.title)}</span></a>
+            ${p == null ? '<span class="muted">not started</span>' : `<span class="mastery-chip ${masteryClass(p)}"><i aria-hidden="true"></i>${masteryName(p)}</span>`}</li>`;
+        }).join('')}</ul>` : '<p class="muted">Lessons for this section are being written.</p>'}
+      </section>`;
+    }).join('')}`;
+}
+
+function viewLesson(lesson) {
+  const count = pool.filter(q => q.skill === lesson.skill).length;
+  view.innerHTML = `
+    ${pageHead(lesson.title, { eyebrow: `${exam.name} · ${sectionTab(sectionOf(exam, lesson.section))} · ${esc(lesson.skill.split(':')[0])}` })}
+    <p class="muted"><a href="#/learn">All lessons</a> · ${esc(lesson.skill)}</p>
+    <article class="card lesson">
+      ${lesson.body.map(p => `<p>${esc(p)}</p>`).join('')}
+      <h2>Key terms</h2>
+      <dl class="terms">${lesson.terms.map(([term, meaning]) => `<dt>${esc(term)}</dt><dd>${esc(meaning)}</dd>`).join('')}</dl>
+      <h2>Worked example</h2>
+      <div class="worked">
+        <p>${esc(lesson.example.problem)}</p>
+        <ol>${lesson.example.steps.map(step => `<li>${esc(step)}</li>`).join('')}</ol>
+        <p><strong>Answer:</strong> ${esc(lesson.example.answer)}</p>
+      </div>
+      <div class="actions">
+        ${count ? `<button type="button" class="button primary" id="check">Check yourself: ${plural(count, 'question')}</button>` : ''}
+      </div>
+      <h2>Go deeper</h2>
+      <ul class="links">${lesson.links.map(l => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a></li>`).join('')}</ul>
+      <p class="hint">OpenStax textbooks are free and openly licensed; Khan Academy’s MCAT course was made with the AAMC.</p>
+    </article>`;
+  on('#check', 'click', () => practiceSkill(lesson.section, lesson.skill));
 }
 
 // Where the estimate puts the student for National Merit, which only the PSAT/NMSQT feeds into.
@@ -1872,7 +1990,7 @@ function viewPlan() {
     </div>
     <div class="card">
       <h2>Focus skills</h2>
-      ${weakest.length ? weakest.map(s => `<div class="skill-row"><span class="name">${esc(s.name)} <span class="muted">· ${sectionShort(s.section)}</span></span>
+      ${weakest.length ? weakest.map(s => `<div class="skill-row"><span class="name">${esc(skillLabel(s.name))} <span class="muted">· ${sectionShort(s.section)}</span></span>
         <div class="track"><div class="fill ${masteryClass(pCorrect(s.theta, 0))}" style="width:${Math.round(pCorrect(s.theta, 0) * 100)}%"></div></div>
         <button class="small" data-focus="${esc(s.name)}" data-section="${s.section}">Practice</button></div>`).join('')
         : '<p class="muted">Answer at least two questions in a skill to see where to focus.</p>'}
@@ -1932,7 +2050,7 @@ function viewLibrary() {
     ${library.warnings.length ? `<div class="card"><h2>Skipped questions</h2>${library.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}</div>` : ''}
     <div class="card">
       <div class="table-wrap"><table>
-        <thead><tr><th>Section</th><th>Domain</th><th class="num">Easy</th><th class="num">Medium</th><th class="num">Hard</th><th class="num">Total</th></tr></thead>
+        <thead><tr><th>Section</th><th>Domain</th><th class="num">${levelName('Easy')}</th><th class="num">${levelName('Medium')}</th><th class="num">${levelName('Hard')}</th><th class="num">Total</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>

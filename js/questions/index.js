@@ -1,4 +1,4 @@
-// The 400 original questions, gathered into one list.
+// The original questions, gathered into one list: 400 for the SAT and, so far, 60 for the MCAT.
 //
 // These are written for this app rather than taken from the College Board bank, so unlike the PDF exports in
 // exports/ they live in the repo and reach everyone who opens the site. Without them a visitor who has not
@@ -16,6 +16,7 @@ import { INFORMATION_AND_IDEAS_QUESTIONS } from './information-and-ideas.js';
 import { CRAFT_AND_STRUCTURE_QUESTIONS } from './craft-and-structure.js';
 import { EXPRESSION_OF_IDEAS_QUESTIONS } from './expression-of-ideas.js';
 import { STANDARD_ENGLISH_QUESTIONS } from './standard-english.js';
+import { MCAT_CP_QUESTIONS } from './mcat-cp.js';
 
 export const ORIGINAL_QUESTIONS = [
   ...ALGEBRA_QUESTIONS,
@@ -26,4 +27,5 @@ export const ORIGINAL_QUESTIONS = [
   ...CRAFT_AND_STRUCTURE_QUESTIONS,
   ...EXPRESSION_OF_IDEAS_QUESTIONS,
   ...STANDARD_ENGLISH_QUESTIONS,
+  ...MCAT_CP_QUESTIONS,
 ];

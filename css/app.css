@@ -543,10 +543,35 @@ button.link:hover:not(:disabled) { text-decoration: underline; }
 .kpi .muted { font-size: 13px; }
 .skill-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; align-items: start; }
 .skill-lists .card + .card { margin-top: 0; }
+/* Four sections (the ACT, the MCAT) would make four narrow cards whose skill names wrap a word a line; two by two instead. */
+.skill-lists:has(> :nth-child(4)) { grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
 .merit { margin-bottom: 14px; }
 .merit p { max-width: 68ch; font-size: 14px; }
 .merit-index { margin: 6px 0 10px; }
 .merit-index strong { font-size: 34px; font-variant-numeric: tabular-nums; margin-right: 6px; }
+.official { margin-bottom: 14px; }
+.official-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; margin-top: 8px; }
+.official-form label { display: grid; gap: 4px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.official-form input[type=number] { width: 84px; font-variant-numeric: tabular-nums; }
+.official-form input[type=text] { width: 180px; }
+.lesson-list { margin-bottom: 14px; }
+.lesson-list ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.lesson-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--rule); }
+.lesson-list li:first-child { border-top: 0; }
+.lesson-list li a { display: flex; gap: 12px; align-items: baseline; color: var(--ink); text-decoration: none; font-weight: 600; }
+.lesson-list li a:hover span:last-child { text-decoration: underline; }
+.lesson-code { min-width: 2.6em; font-variant-numeric: tabular-nums; color: var(--accent-ink); font-weight: 800; }
+.lesson { max-width: 76ch; }
+.lesson > p { line-height: 1.6; }
+.lesson h2 { margin: 22px 0 8px; font-size: 17px; }
+.terms { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; }
+.terms dt { font-weight: 700; }
+.terms dd { margin: 0; color: var(--body); }
+.worked { padding: 12px 16px; border-radius: 10px; background: var(--accent-soft); }
+.worked ol { margin: 6px 0; padding-left: 20px; line-height: 1.6; }
+.lesson .links { padding-left: 20px; line-height: 1.8; }
+.lesson .links a { color: var(--accent-ink); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 560px) { .terms { grid-template-columns: 1fr; } .terms dd { margin-bottom: 6px; } }
 .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .card-head h2 { margin: 0; }
 .skill-list { list-style: none; padding: 0; margin: 0; }

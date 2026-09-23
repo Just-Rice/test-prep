@@ -3,6 +3,7 @@
 
 import { DOMAINS as CB_DOMAINS, GRADE_PRIOR } from './taxonomy.js';
 import { ACT_DOMAINS } from './taxonomy-act.js';
+import { MCAT_DOMAINS } from './taxonomy-mcat.js';
 
 // College Board's digital SAT Suite: two adaptive modules per section, the same structure for the SAT,
 // PSAT/NMSQT and PSAT 10, and PSAT 8/9. Domain shares are approximate, from College Board's test specifications.
@@ -68,6 +69,38 @@ export const EXAMS = {
     scale: { min: 1, max: 36, center: 18, spread: 6, step: 1 },
     total: { kind: 'average', sections: ['ENG', 'MATH', 'READ'], min: 1, max: 36, label: 'Composite' },
     grades: [9, 10, 11, 12], gradePrior: { 8: -0.9, 9: -0.6, 10: -0.3, 11: 0, 12: 0.2 },
+  },
+  mcat: {
+    id: 'mcat', name: 'MCAT', long: 'MCAT', maker: 'AAMC', source: 'original',
+    // Not adaptive: each section is one timed block, mostly passage sets with some stand-alone questions. AAMC
+    // publishes no question bank, so every question here is written for this app (js/questions/mcat-*.js).
+    adaptive: false,
+    domains: MCAT_DOMAINS,
+    sections: [
+      { id: 'CP', name: 'Chemical and Physical Foundations of Biological Systems', short: 'Chem/Phys', perModule: 59, modules: 1, minutes: 95, tools: ['highlighter'] },
+      { id: 'CARS', name: 'Critical Analysis and Reasoning Skills', short: 'CARS', perModule: 53, modules: 1, minutes: 90, tools: ['highlighter'] },
+      { id: 'BB', name: 'Biological and Biochemical Foundations of Living Systems', short: 'Bio/Biochem', perModule: 59, modules: 1, minutes: 95, tools: ['highlighter'] },
+      { id: 'PS', name: 'Psychological, Social, and Biological Foundations of Behavior', short: 'Psych/Soc', perModule: 59, modules: 1, minutes: 95, tools: ['highlighter'] },
+    ],
+    // The AAMC's section overviews, "approximated to the nearest 5%".
+    domainShare: {
+      CP: { 'Physical principles of living systems (Foundational Concept 4)': 0.4, 'Chemical principles of living systems (Foundational Concept 5)': 0.6 },
+      CARS: { 'Critical analysis and reasoning': 1 },
+      BB: { 'Biomolecules (Foundational Concept 1)': 0.55, 'Cells (Foundational Concept 2)': 0.2, 'Organ systems (Foundational Concept 3)': 0.25 },
+      PS: {
+        'Sensing and processing (Foundational Concept 6)': 0.25, 'Individual behavior (Foundational Concept 7)': 0.35,
+        'Self and others (Foundational Concept 8)': 0.2, 'Social structure and demographics (Foundational Concept 9)': 0.15,
+        'Social inequality (Foundational Concept 10)': 0.05,
+      },
+    },
+    // Each section is scored 118-132 and the total 472-528; 125 is the middle of a section's scale.
+    scale: { min: 118, max: 132, center: 125, spread: 2.6, step: 1 },
+    total: { kind: 'sum', min: 472, max: 528 },
+    // Difficulty is shown as three tiers rather than easy, medium and hard.
+    levelNames: { Easy: 'Foundation', Medium: 'Intermediate', Hard: 'Exam-level' },
+    grades: [13, 14, 15, 16, 17],
+    gradeNames: { 13: 'First year of college', 14: 'Second year of college', 15: 'Third year of college', 16: 'Fourth year of college', 17: 'Graduated' },
+    gradePrior: { 13: -0.6, 14: -0.4, 15: -0.15, 16: 0, 17: 0.1 },
   },
 };
 
