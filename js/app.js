@@ -2499,6 +2499,7 @@ function ownKeyCardHtml() {
         ? 'Hints and explanations use your own key, so they come out of your own free Gemini allowance rather than the shared ' + AI_DAILY_LIMIT + ' a day, and work without signing in.'
         : `Optional. Everyone shares one small free Gemini allowance, so each student gets ${AI_DAILY_LIMIT} hints and explanations a day. With a free key of your own, yours come out of your own allowance instead, and work without signing in.`}
         The key stays in this browser: it is never uploaded or synced to your account.</p>
+      <p class="note"><strong>Only for people 18 or older.</strong> Google’s terms for the Gemini API require you to be 18 or over to create or use a key.</p>
       ${has
         ? `<p><strong>A key is saved</strong> <span class="muted">(ending …${esc(ownKey().slice(-4))})</span></p>
            <div class="actions"><button type="button" class="danger" id="own-key-remove">Remove key</button></div>`
