@@ -25,14 +25,26 @@ export const explainConfigured = Boolean(FIREBASE_CONFIG);
 // A student's own Gemini API key, from Google AI Studio. With one, requests go straight from this browser to
 // the Gemini API on the student's own free allowance, rather than through Firebase on the site's shared one, so
 // they neither count against the shared daily limit nor need signing in. Gemini's API accepts calls from this
-// site's address. The key is kept in this browser only: never uploaded, never synced to the account.
+// site's address. A signed-in student's key is kept with their account (js/sync.js) and this browser holds a
+// copy, noting which account it belongs to, so it can be dropped when that account signs out.
 const OWN_KEY = 'satprep.geminiKey';
+const OWN_KEY_ACCOUNT = 'satprep.geminiKeyAccount';
 export function ownKey() {
   try { return localStorage.getItem(OWN_KEY) || ''; } catch { return ''; }
 }
-export function setOwnKey(key) {
+// The account the copy here belongs to, or '' for a key added while signed out.
+export function ownKeyAccount() {
+  try { return localStorage.getItem(OWN_KEY_ACCOUNT) || ''; } catch { return ''; }
+}
+export function setOwnKey(key, account = '') {
   try {
-    if (key) localStorage.setItem(OWN_KEY, key.trim()); else localStorage.removeItem(OWN_KEY);
+    if (key) {
+      localStorage.setItem(OWN_KEY, key.trim());
+      localStorage.setItem(OWN_KEY_ACCOUNT, account);
+    } else {
+      localStorage.removeItem(OWN_KEY);
+      localStorage.removeItem(OWN_KEY_ACCOUNT);
+    }
   } catch { /* storage unavailable */ }
 }
 const GENERATION = {

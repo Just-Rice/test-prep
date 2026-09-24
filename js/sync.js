@@ -207,6 +207,30 @@ function cloudFor(uid, exam) {
   };
 }
 
+// ---------- a student's own Gemini key ----------
+//
+// Kept with the account so it follows the student to every device they sign in on: one small document under
+// their own users/{uid}, which firestore.rules lets only them read or write. undefined means it couldn't be
+// read (offline), as distinct from null, no key.
+
+const keyRef = () => fb.firestore.doc(fb.db, 'users', user.uid, 'private', 'gemini');
+
+export async function readAccountKey() {
+  if (!user || !fb) return undefined;
+  try {
+    const snap = await fb.firestore.getDoc(keyRef());
+    return snap.exists() ? snap.data().key ?? null : null;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writeAccountKey(key) {
+  if (!user || !fb) return;
+  if (key) await fb.firestore.setDoc(keyRef(), { key });
+  else await fb.firestore.deleteDoc(keyRef());
+}
+
 // ---------- accounts ----------
 
 export async function signInWithGoogle() {

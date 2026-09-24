@@ -6,14 +6,14 @@ import {
 import { EXAMS, EXAM_IDS, NATIONAL_MERIT, examsOfQuestion, scoredSections, sectionOf, selectionIndex, skillsOf, totalScore } from './exams.js';
 import { addMistake, dueMistakes, reviewMistake } from './srs.js';
 import { applySettings, CHOICES, loadSettings, saveSettings } from './settings.js';
-import { answeredBefore, checkOwnKey, explainConfigured, explainKey, explainQuestion, hintFor, hintKey, ownKey, setOwnKey } from './explain.js';
+import { answeredBefore, checkOwnKey, explainConfigured, explainKey, explainQuestion, hintFor, hintKey, ownKey, ownKeyAccount, setOwnKey } from './explain.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
 import { ORIGINAL_QUESTIONS } from './questions/index.js';
 import { MCAT_CP_LESSONS } from './lessons/mcat-cp.js';
 import { mountCalculator } from './calc.js';
 import { currentStreak, dayKey, longestStreak } from './streak.js';
 import {
-  initSync, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState,
+  initSync, readAccountKey, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState, writeAccountKey,
 } from './sync.js';
 import {
   joinWithCode, libraryAccess, listTesters, loadCloudQuestions, MIN_CODE, pictureUrl, plainCode, publishLibrary,
@@ -2490,27 +2490,46 @@ const SETTING_GROUPS = [
 ];
 
 // Bring your own Gemini key: a free key from Google AI Studio gives this student their own allowance, instead of
-// a share of the site's. Kept in this browser only (see explain.js).
+// a share of the site's. Signed in, it is kept with the account and follows the student between devices; signed
+// out, it stays in this browser until they sign in (see syncOwnKey).
+async function syncOwnKey(uid) {
+  const inAccount = await readAccountKey();
+  if (inAccount === undefined || syncState().uid !== uid) return;   // couldn't be read, or someone else by now
+  const here = ownKey();
+  if (inAccount) setOwnKey(inAccount, uid);
+  else if (here && !ownKeyAccount()) {
+    // Added on this device before signing in: it joins the account, as progress made signed out does.
+    try { await writeAccountKey(here); setOwnKey(here, uid); } catch { /* kept on this device for now */ }
+  } else if (here) setOwnKey('');   // removed from the account on another device
+  if (ownKey() !== here && ['settings', 'practice', 'review', 'mistakes'].includes(currentRoute)) render({ quiet: true });
+}
+
 function ownKeyCardHtml() {
   const has = Boolean(ownKey());
+  const account = signedIn();
+  const where = account
+    ? 'It’s saved to your account, so it’s there on every device you sign in to, and it’s removed from this browser when you sign out. Only you can read it; the site’s owner, who runs its database, could also see it.'
+    : 'It’s saved in this browser. Sign in and it moves to your account, so it follows you to your other devices.';
   return `<section class="card own-key">
       <h2 id="own-key-title">Your own Gemini key</h2>
       <p class="hint">${has
-        ? 'Hints and explanations use your own key, so they come out of your own free Gemini allowance rather than the shared ' + AI_DAILY_LIMIT + ' a day, and work without signing in.'
-        : `Optional. Everyone shares one small free Gemini allowance, so each student gets ${AI_DAILY_LIMIT} hints and explanations a day. With a free key of your own, yours come out of your own allowance instead, and work without signing in.`}
-        The key stays in this browser: it is never uploaded or synced to your account.</p>
+        ? `Hints and explanations use your own key, so they come out of your own free Gemini allowance rather than the shared ${AI_DAILY_LIMIT} a day, and work without signing in.`
+        : `Optional. Everyone shares one small free Gemini allowance, so each student gets ${AI_DAILY_LIMIT} hints and explanations a day. With a free key of your own, yours come out of your own allowance instead (about 20 a day), and work without signing in.`} ${where}</p>
       <p class="note"><strong>Only for people 18 or older.</strong> Google’s terms for the Gemini API require you to be 18 or over to create or use a key.</p>
       ${has
         ? `<p><strong>A key is saved</strong> <span class="muted">(ending …${esc(ownKey().slice(-4))})</span></p>
            <div class="actions"><button type="button" class="danger" id="own-key-remove">Remove key</button></div>`
-        : `<ol class="steps">
-             <li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio’s API keys page</a> and sign in with a Google account.</li>
-             <li>Choose “Create API key” and copy it. It’s free and needs no card.</li>
-             <li>Paste it here. It’s checked with one small request before it’s kept.</li>
+        : `<h3>How to get a key (about two minutes, free)</h3>
+           <ol class="steps">
+             <li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio’s API Keys page</a> and sign in with your Google account. The first time, accept the terms; AI Studio then sets up a project called “Default Gemini Project” for you.</li>
+             <li>Click <strong>Create API key</strong>. In the “Create a new key” box, type any name (for example “Test Prep”), leave <strong>Default Gemini Project</strong> selected, and click <strong>Create key</strong>.</li>
+             <li>Copy the new key with the copy icon beside it. It’s a long code that starts with <code>AIza</code>.</li>
+             <li>Paste it below and choose <strong>Check and save</strong>. One tiny request checks it works before it’s kept.</li>
            </ol>
+           <p class="hint">It’s free: no card is needed, and you don’t need to click “Set up billing”. Keep the key to yourself, like a password; if you think someone else has it, delete it on that same page and make a new one.</p>
            <form id="own-key-form" class="own-key-form">
              <label for="own-key">Gemini API key</label>
-             <input id="own-key" name="key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key">
+             <input id="own-key" name="key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key (starts with AIza)">
              <button type="submit" class="primary">Check and save</button>
            </form>`}
       <p class="warn" id="own-key-error" role="alert"></p>
@@ -2533,11 +2552,25 @@ function bindOwnKeyCard() {
       button.textContent = 'Check and save';
       return;
     }
-    setOwnKey(key);
-    toast('Key saved. Hints now use your own allowance.');
+    const uid = signedIn() ? syncState().uid : null;
+    if (uid) {
+      try {
+        await writeAccountKey(key);
+      } catch {
+        error.textContent = 'The key works, but it couldn’t be saved to your account just now. Check your connection and try again.';
+        button.disabled = false;
+        button.textContent = 'Check and save';
+        return;
+      }
+    }
+    setOwnKey(key, uid ?? '');
+    toast(uid ? 'Key saved to your account' : 'Key saved in this browser');
     viewSettings();
   });
-  confirmButton('#own-key-remove', 'Click again to remove', () => {
+  confirmButton('#own-key-remove', 'Click again to remove', async () => {
+    if (ownKeyAccount() && signedIn()) {
+      try { await writeAccountKey(null); } catch { toast('Couldn’t remove it from your account just now; try again'); return; }
+    }
     setOwnKey('');
     toast('Key removed');
     viewSettings();
@@ -2959,6 +2992,8 @@ loadLibrary().then(result => {
         saveTest();
       }
       try { localStorage.setItem(LAST_ACCOUNT_KEY, uid); } catch { /* storage unavailable */ }
+      if (ownKeyAccount() && ownKeyAccount() !== uid) setOwnKey('');
+      syncOwnKey(uid);
     },
     onChange: state => {
       if (state.account && state.phase === 'synced' && lastPhase === 'syncing' && !state.lastSyncedToastShown) toast('Synced');
@@ -2969,7 +3004,10 @@ loadLibrary().then(result => {
       // first page is drawn, so a question page drawn in that moment offered "Sign in for hints" to someone
       // who was. Draw it again, quietly, whenever signing in or out changes which one it should show.
       const nowSignedIn = Boolean(state.account);
-      if (nowSignedIn !== wasSignedIn && ['practice', 'review', 'mistakes'].includes(currentRoute)) render({ quiet: true });
+      // A key that came with the account leaves this browser when the account signs out, so it isn't left
+      // behind for whoever uses the device next.
+      if (wasSignedIn && !nowSignedIn && ownKeyAccount()) setOwnKey('');
+      if (nowSignedIn !== wasSignedIn && ['practice', 'review', 'mistakes', 'settings'].includes(currentRoute)) render({ quiet: true });
       wasSignedIn = nowSignedIn;
       syncCloudLibrary(state);
     },

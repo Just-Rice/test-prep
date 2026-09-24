@@ -72,6 +72,16 @@ service cloud.firestore {
       allow create, update: if ownedBy(uid) && otherTest(exam) && period(chunk) && progressDocument();
     }
 
+    // A student's own Gemini API key, kept with their account so it follows them between devices. Only they
+    // can read or change it.
+    match /users/{uid}/private/gemini {
+      allow read, delete: if ownedBy(uid);
+      allow create, update: if ownedBy(uid)
+        && request.resource.data.keys().hasOnly(['key'])
+        && request.resource.data.key is string
+        && request.resource.data.key.size() <= 200;
+    }
+
     // The shared question library: invited people read it, only an admin replaces it.
     match /library/{document=**} {
       allow read: if mayReadLibrary();
