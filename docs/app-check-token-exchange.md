@@ -163,3 +163,21 @@ What was checked the same day:
   registration and enforcement settings. A reply asking support to confirm whether the cycle is safe (or to
   re-provision the linkage from their side) was drafted for the owner to approve and send, with screenshots
   of the IAM page and the key.
+
+## Working again, 24 September 2026, before the API cycle
+
+Before disabling anything, the exchange was measured on the live site (https://just-rice.github.io/test-prep/)
+by obtaining a reCAPTCHA Enterprise token and posting it straight to `exchangeRecaptchaEnterpriseToken`.
+It **succeeded**: HTTP 200 with an App Check token and `ttl: 3600s`, four times out of four, and the Firebase
+SDK's own `getToken()` with `ReCaptchaEnterpriseProvider` returned a token too. Every such request had failed
+with 400 FAILED_PRECONDITION from 19 to 22 September, and no setting in the project was changed in between,
+so the fix was on Google's side, around the time support picked up the case. The disable/re-enable cycle
+was therefore **not** performed: it would only have added the risk of deleting the key or the registration.
+
+Still to do: the App Check dashboard reports AI Logic requests with a delay, and at the time still showed 0%
+verified for the preceding days. Once it shows verified requests, App Check can be enforced for Firebase AI
+Logic ahead of the 2 November 2026 deadline.
+
+Separately, Gemini refused requests that day with `429 You exceeded your current quota`. The project's free
+tier for gemini-3.8-flash is 5 requests per minute and **20 requests per day** for the whole project, which
+several students would exhaust quickly. That is a quota limit, unrelated to App Check.
