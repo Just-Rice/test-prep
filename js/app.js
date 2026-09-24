@@ -6,7 +6,7 @@ import {
 import { EXAMS, EXAM_IDS, NATIONAL_MERIT, examsOfQuestion, scoredSections, sectionOf, selectionIndex, skillsOf, totalScore } from './exams.js';
 import { addMistake, dueMistakes, reviewMistake } from './srs.js';
 import { applySettings, CHOICES, loadSettings, saveSettings } from './settings.js';
-import { explainConfigured, explainQuestion, hintFor } from './explain.js';
+import { answeredBefore, explainConfigured, explainKey, explainQuestion, hintFor, hintKey } from './explain.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
 import { ORIGINAL_QUESTIONS } from './questions/index.js';
 import { MCAT_CP_LESSONS } from './lessons/mcat-cp.js';
@@ -787,9 +787,41 @@ const aiNeedsSignIn = () => explainConfigured && settings.explain === 'on' && sy
 
 const aiNoteHtml = () => (aiReady() ? '<div class="ai-note" hidden></div>' : '');
 
+// Gemini's free tier gives the whole site 20 requests a day (and 5 a minute) for the model the app uses, shared by
+// every student, so each student gets a fair share of it a day. A hint or explanation already given is shown again
+// from memory and costs nothing. Counted per account on each device; it resets at midnight.
+const AI_DAILY_LIMIT = 5;
+const aiCountKey = () => `satprep.ai.${syncState().uid ?? 'signed-out'}`;
+function aiUsedToday() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(aiCountKey()));
+    return saved?.day === dayKey(Date.now()) ? saved.used : 0;
+  } catch {
+    return 0;
+  }
+}
+function countAiUse() {
+  try { localStorage.setItem(aiCountKey(), JSON.stringify({ day: dayKey(Date.now()), used: aiUsedToday() + 1 })); } catch { /* storage unavailable */ }
+}
+const aiLeft = () => Math.max(0, AI_DAILY_LIMIT - aiUsedToday());
+const aiLabel = (base, key) => (answeredBefore(key) ? base : aiLeft() ? `${base} · ${aiLeft()} left today` : `${base} · none left today`);
+// A hint or explain button, labelled with what is left today and switched off once it has run out.
+function aiButton(base, key, attrs) {
+  const out = !aiLeft() && !answeredBefore(key);
+  return `<button type="button" class="ghost small" ${attrs} data-base="${esc(base)}" data-key="${esc(key)}"${out ? ` disabled title="Gemini’s free allowance is shared by everyone, so each student gets ${AI_DAILY_LIMIT} a day. More tomorrow."` : ''}>${esc(aiLabel(base, key))}</button>`;
+}
+
 // Runs one request and shows the answer under the question. The button stays put and reports its own progress,
 // so a slow reply never looks like nothing happened.
 async function showAi(button, note, run, label) {
+  const { base, key } = button.dataset;
+  const free = key && answeredBefore(key);
+  if (!free && !aiLeft()) {
+    note.hidden = false;
+    note.className = 'ai-note bad';
+    note.textContent = `That’s today’s ${AI_DAILY_LIMIT} AI hints and explanations used. Gemini’s free allowance is shared by everyone, so they come back tomorrow.`;
+    return;
+  }
   const original = button.textContent;
   button.disabled = true;
   button.textContent = 'Thinking…';
@@ -798,6 +830,7 @@ async function showAi(button, note, run, label) {
   note.textContent = 'Asking Gemini…';
   try {
     const text = await run();
+    if (!free) countAiUse();
     if (!note.isConnected) return;
     note.className = 'ai-note';
     note.innerHTML = `<strong>${esc(label)}</strong>${para(text)}<small>Written by Gemini, so it can be wrong — check it against the explanation.</small>`;
@@ -807,8 +840,8 @@ async function showAi(button, note, run, label) {
     note.textContent = err.message;
   } finally {
     if (button.isConnected) {
-      button.disabled = false;
-      button.textContent = original;
+      button.textContent = base ? aiLabel(base, key) : original;
+      button.disabled = Boolean(base) && !aiLeft() && !answeredBefore(key);
     }
   }
 }
@@ -825,9 +858,9 @@ function renderDrill(headerHtml, source, rerender) {
     <div class="actions">${awaitingSelfMark ? ''
       : st.revealed ? '<button class="primary" id="next">Next question</button>'
       : `<button class="primary" id="check" ${st.selected == null ? 'disabled' : ''}>Check answer</button>`}
-      ${aiReady() && !st.revealed ? '<button class="ghost small" id="hint">Give me a hint</button>' : ''}
+      ${aiReady() && !st.revealed ? aiButton('Give me a hint', hintKey(q), 'id="hint"') : ''}
       ${aiNeedsSignIn() && !st.revealed ? '<a class="small hint-signin" href="#/account">Sign in for hints</a>' : ''}
-      ${aiReady() && st.revealed && st.correct != null ? '<button class="ghost small" id="explain">Explain this</button>' : ''}
+      ${aiReady() && st.revealed && st.correct != null ? aiButton('Explain this', explainKey(q, st.selected), 'id="explain"') : ''}
     </div>
     ${aiNoteHtml()}`;
 
@@ -1188,7 +1221,7 @@ function viewMistakes(arg) {
             <div class="mistake-body" data-qid="${esc(id)}">
               ${questionHtml(q, { selected: missed?.choice ?? null, revealed: true, correct: false, hideMeta: true })}
               ${reasonPicker(id)}
-              <div class="actions"><button class="small" data-practice-skill="${esc(q.skill)}" data-practice-section="${q.section}">Practice this skill</button>${aiReady() ? '<button class="small ghost" data-explain>Explain this</button>' : ''}</div>
+              <div class="actions"><button class="small" data-practice-skill="${esc(q.skill)}" data-practice-section="${q.section}">Practice this skill</button>${aiReady() ? aiButton('Explain this', explainKey(q, lastMiss(q.id)?.choice ?? null), 'data-explain') : ''}</div>
               ${aiNoteHtml()}
             </div>
           </details>
@@ -2451,7 +2484,7 @@ const SETTING_GROUPS = [
   ['textsize', 'Text size', 'Scales the questions, passages and everything else.'],
   ['contrast', 'Contrast', 'Turn this up if text or borders are hard to make out.'],
   ['motion', 'Animation', 'How much the app moves as pages and answers appear.'],
-  ['explain', 'Explain with AI', 'A hint before you answer, and an explanation afterwards, written by Google’s Gemini. You need to be signed in to use it. Questions you ask about are sent to Google.'],
+  ['explain', 'Explain with AI', `A hint before you answer, and an explanation afterwards, written by Google’s Gemini. You need to be signed in to use it, and each student gets ${AI_DAILY_LIMIT} a day, since Gemini’s free allowance is shared by everyone. Questions you ask about are sent to Google.`],
   ['questions', 'Questions written for this app', 'Alongside the official College Board and ACT questions there are 400 SAT-style ones written for this app, each answer checked by a test. Your progress on them is kept either way.'],
 ];
 

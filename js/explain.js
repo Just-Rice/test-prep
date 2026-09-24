@@ -26,6 +26,10 @@ let model = null;
 let loading = null;
 // One answer per question is enough: asking twice costs another call and says the same thing.
 const answers = new Map();
+export const hintKey = q => `hint|${q.id}`;
+export const explainKey = (q, chosen) => `explain|${q.id}|${chosen ?? ''}`;
+// Whether asking would be answered from memory, without a request to Gemini (so it uses none of the allowance).
+export const answeredBefore = key => answers.has(key);
 
 // Firebase enforces App Check for AI Logic, so the app has to prove it is this site before Gemini will answer.
 // Registration happens once, before the first request; afterwards the SDK refreshes the token on its own.
@@ -164,7 +168,7 @@ const NO_APP_CHECK = 'Gemini needs an App Check site key before it can answer. S
 
 export async function explainQuestion(q, { chosen, correct, examName = 'SAT' } = {}) {
   if (!RECAPTCHA_SITE_KEY) throw new Error(NO_APP_CHECK);
-  const key = `explain|${q.id}|${chosen ?? ''}`;
+  const key = explainKey(q, chosen);
   if (answers.has(key)) return answers.get(key);
   const key2 = answerText(q);
   const instruction = [
@@ -189,7 +193,7 @@ export async function explainQuestion(q, { chosen, correct, examName = 'SAT' } =
 // A nudge before answering. The answer is deliberately withheld from the prompt so it cannot leak.
 export async function hintFor(q, { examName = 'SAT' } = {}) {
   if (!RECAPTCHA_SITE_KEY) throw new Error(NO_APP_CHECK);
-  const key = `hint|${q.id}`;
+  const key = hintKey(q);
   if (answers.has(key)) return answers.get(key);
   const instruction = [
     `You are a patient ${examName} tutor helping a high-school student who is stuck.`,
