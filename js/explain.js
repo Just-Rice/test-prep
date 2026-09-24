@@ -22,6 +22,28 @@ const LIMIT = 900;                  // characters of question text sent, so one 
 
 export const explainConfigured = Boolean(FIREBASE_CONFIG);
 
+// A student's own Gemini API key, from Google AI Studio. With one, requests go straight from this browser to
+// the Gemini API on the student's own free allowance, rather than through Firebase on the site's shared one, so
+// they neither count against the shared daily limit nor need signing in. Gemini's API accepts calls from this
+// site's address. The key is kept in this browser only: never uploaded, never synced to the account.
+const OWN_KEY = 'satprep.geminiKey';
+export function ownKey() {
+  try { return localStorage.getItem(OWN_KEY) || ''; } catch { return ''; }
+}
+export function setOwnKey(key) {
+  try {
+    if (key) localStorage.setItem(OWN_KEY, key.trim()); else localStorage.removeItem(OWN_KEY);
+  } catch { /* storage unavailable */ }
+}
+const GENERATION = {
+  maxOutputTokens: 600, temperature: 0.3,
+  // Thinking is turned off. This model thinks before it answers, and the thinking counts against the
+  // same 600-token allowance: measured on a 150-word explanation it spent 574 tokens thinking and was cut
+  // off after 22 words of answer. With thinking off the same request finished in full, in about three
+  // seconds. Hints and explanations here are short and are given the right answer, so they don't need it.
+  thinkingConfig: { thinkingBudget: 0 },
+};
+
 let model = null;
 let loading = null;
 // One answer per question is enough: asking twice costs another call and says the same thing.
@@ -65,11 +87,7 @@ async function getModel() {
     const backend = ai.getAI(firebaseApp, { backend: new ai.GoogleAIBackend() });
     model = ai.getGenerativeModel(backend, {
       model: MODEL,
-      // Thinking is turned off. This model thinks before it answers, and the thinking counts against the
-      // same 600-token allowance: measured on a 150-word explanation it spent 574 tokens thinking and was cut
-      // off after 22 words of answer. With thinking off the same request finished in full, in about three
-      // seconds. Hints and explanations here are short and are given the right answer, so they don't need it.
-      generationConfig: { maxOutputTokens: 600, temperature: 0.3, thinkingConfig: { thinkingBudget: 0 } },
+      generationConfig: GENERATION,
     });
     return model;
   })();
@@ -110,6 +128,9 @@ async function questionParts(q) {
     q.choices?.some(c => c.text) ? `Answer choices:\n${q.choices.map(c => `${c.letter}. ${c.text ?? '(shown as an image)'}`).join('\n')}` : '',
   ].filter(Boolean).join('\n\n');
   if (text) parts.push(text);
+  // An ACT Science passage is a picture of tables and graphs, which the question can't be answered without.
+  const passage = await imagePart(q.passageImage);
+  if (passage) parts.push('The passage for this question:', passage);
   const image = await imagePart(q.promptImage);
   if (image) {
     parts.push(image);
@@ -128,11 +149,47 @@ async function questionParts(q) {
 const answerText = q => (Array.isArray(q.answer) ? q.answer.join(' or ') : q.answer);
 
 async function ask(instruction, q) {
-  const generative = await getModel();
-  const result = await generative.generateContent([instruction, ...(await questionParts(q))]);
-  const text = result.response.text().trim();
+  const parts = [instruction, ...(await questionParts(q))];
+  const key = ownKey();
+  const text = (key ? await askWithKey(key, parts) : (await (await getModel()).generateContent(parts)).response.text()).trim();
   if (!text) throw new Error('empty response');
   return text;
+}
+
+// The same request, made directly to the Gemini API with the student's own key.
+async function askWithKey(key, parts) {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: parts.map(part => (typeof part === 'string' ? { text: part } : part)) }],
+      generationConfig: GENERATION,
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`[${res.status}] ${body.error?.status ?? ''} ${body.error?.message ?? ''}`);
+  return (body.candidates?.[0]?.content?.parts ?? []).map(part => part.text ?? '').join('');
+}
+
+// Checks a key before it is kept, with one tiny request, so a mistyped key is caught in Settings rather than
+// at the first hint.
+export async function checkOwnKey(key) {
+  try {
+    await askWithKey(key.trim(), ['Reply with the single word OK.']);
+    return null;
+  } catch (err) {
+    return describeOwnKeyError(err);
+  }
+}
+
+function describeOwnKeyError(err) {
+  const message = String(err?.message || err);
+  if (/API_KEY_INVALID|API key not valid|\b400\b.*key/i.test(message)) return 'That Gemini API key wasn’t accepted. Check it was copied in full from Google AI Studio.';
+  if (/\b429\b|RESOURCE_EXHAUSTED|quota/i.test(message)) return 'Your own Gemini key’s free allowance is used up for now. Try again in a minute, or tomorrow if today’s limit has been reached.';
+  if (/\b403\b|PERMISSION_DENIED/i.test(message)) return 'Your Gemini key isn’t allowed to use this model. In Google AI Studio, check the key’s project can use the Gemini API.';
+  if (/\b50[03]\b|UNAVAILABLE|overloaded|high demand/i.test(message)) return 'Gemini is very busy right now. Try again in a minute.';
+  if (/failed to fetch|network/i.test(message)) return 'Could not reach Gemini. Check your internet connection.';
+  return `Gemini could not answer: ${message}`;
 }
 
 function describeError(err) {
@@ -167,7 +224,7 @@ function describeError(err) {
 const NO_APP_CHECK = 'Gemini needs an App Check site key before it can answer. See RECAPTCHA_SITE_KEY in js/firebase-config.js.';
 
 export async function explainQuestion(q, { chosen, correct, examName = 'SAT' } = {}) {
-  if (!RECAPTCHA_SITE_KEY) throw new Error(NO_APP_CHECK);
+  if (!RECAPTCHA_SITE_KEY && !ownKey()) throw new Error(NO_APP_CHECK);
   const key = explainKey(q, chosen);
   if (answers.has(key)) return answers.get(key);
   const key2 = answerText(q);
@@ -186,13 +243,13 @@ export async function explainQuestion(q, { chosen, correct, examName = 'SAT' } =
     answers.set(key, text);
     return text;
   } catch (err) {
-    throw new Error(describeError(err));
+    throw new Error(ownKey() ? describeOwnKeyError(err) : describeError(err));
   }
 }
 
 // A nudge before answering. The answer is deliberately withheld from the prompt so it cannot leak.
 export async function hintFor(q, { examName = 'SAT' } = {}) {
-  if (!RECAPTCHA_SITE_KEY) throw new Error(NO_APP_CHECK);
+  if (!RECAPTCHA_SITE_KEY && !ownKey()) throw new Error(NO_APP_CHECK);
   const key = hintKey(q);
   if (answers.has(key)) return answers.get(key);
   const instruction = [
@@ -206,6 +263,6 @@ export async function hintFor(q, { examName = 'SAT' } = {}) {
     answers.set(key, text);
     return text;
   } catch (err) {
-    throw new Error(describeError(err));
+    throw new Error(ownKey() ? describeOwnKeyError(err) : describeError(err));
   }
 }

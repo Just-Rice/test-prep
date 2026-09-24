@@ -6,7 +6,7 @@ import {
 import { EXAMS, EXAM_IDS, NATIONAL_MERIT, examsOfQuestion, scoredSections, sectionOf, selectionIndex, skillsOf, totalScore } from './exams.js';
 import { addMistake, dueMistakes, reviewMistake } from './srs.js';
 import { applySettings, CHOICES, loadSettings, saveSettings } from './settings.js';
-import { answeredBefore, explainConfigured, explainKey, explainQuestion, hintFor, hintKey } from './explain.js';
+import { answeredBefore, checkOwnKey, explainConfigured, explainKey, explainQuestion, hintFor, hintKey, ownKey, setOwnKey } from './explain.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
 import { ORIGINAL_QUESTIONS } from './questions/index.js';
 import { MCAT_CP_LESSONS } from './lessons/mcat-cp.js';
@@ -782,8 +782,9 @@ function bindReasonPicker(qid) {
 // Gemini answers signed-in students only: Firebase AI Logic's authenticated-users mode is enforced, so a request
 // from someone signed out is refused. Rather than a button that can only fail, they get a link to sign in.
 const signedIn = () => syncConfigured && Boolean(syncState().account);
-const aiReady = () => explainConfigured && settings.explain === 'on' && signedIn();
-const aiNeedsSignIn = () => explainConfigured && settings.explain === 'on' && syncConfigured && !signedIn();
+// A student with their own Gemini key (Settings) uses their own allowance, so needs neither signing in nor the cap.
+const aiReady = () => settings.explain === 'on' && (Boolean(ownKey()) || (explainConfigured && signedIn()));
+const aiNeedsSignIn = () => explainConfigured && settings.explain === 'on' && syncConfigured && !signedIn() && !ownKey();
 
 const aiNoteHtml = () => (aiReady() ? '<div class="ai-note" hidden></div>' : '');
 
@@ -803,8 +804,8 @@ function aiUsedToday() {
 function countAiUse() {
   try { localStorage.setItem(aiCountKey(), JSON.stringify({ day: dayKey(Date.now()), used: aiUsedToday() + 1 })); } catch { /* storage unavailable */ }
 }
-const aiLeft = () => Math.max(0, AI_DAILY_LIMIT - aiUsedToday());
-const aiLabel = (base, key) => (answeredBefore(key) ? base : aiLeft() ? `${base} · ${aiLeft()} left today` : `${base} · none left today`);
+const aiLeft = () => (ownKey() ? Infinity : Math.max(0, AI_DAILY_LIMIT - aiUsedToday()));
+const aiLabel = (base, key) => (ownKey() || answeredBefore(key) ? base : aiLeft() ? `${base} · ${aiLeft()} left today` : `${base} · none left today`);
 // A hint or explain button, labelled with what is left today and switched off once it has run out.
 function aiButton(base, key, attrs) {
   const out = !aiLeft() && !answeredBefore(key);
@@ -830,7 +831,7 @@ async function showAi(button, note, run, label) {
   note.textContent = 'Asking Gemini…';
   try {
     const text = await run();
-    if (!free) countAiUse();
+    if (!free && !ownKey()) countAiUse();
     if (!note.isConnected) return;
     note.className = 'ai-note';
     note.innerHTML = `<strong>${esc(label)}</strong>${para(text)}<small>Written by Gemini, so it can be wrong — check it against the explanation.</small>`;
@@ -2488,6 +2489,60 @@ const SETTING_GROUPS = [
   ['questions', 'Questions written for this app', 'Alongside the official College Board and ACT questions there are 400 SAT-style ones written for this app, each answer checked by a test. Your progress on them is kept either way.'],
 ];
 
+// Bring your own Gemini key: a free key from Google AI Studio gives this student their own allowance, instead of
+// a share of the site's. Kept in this browser only (see explain.js).
+function ownKeyCardHtml() {
+  const has = Boolean(ownKey());
+  return `<section class="card own-key">
+      <h2 id="own-key-title">Your own Gemini key</h2>
+      <p class="hint">${has
+        ? 'Hints and explanations use your own key, so they come out of your own free Gemini allowance rather than the shared ' + AI_DAILY_LIMIT + ' a day, and work without signing in.'
+        : `Optional. Everyone shares one small free Gemini allowance, so each student gets ${AI_DAILY_LIMIT} hints and explanations a day. With a free key of your own, yours come out of your own allowance instead, and work without signing in.`}
+        The key stays in this browser: it is never uploaded or synced to your account.</p>
+      ${has
+        ? `<p><strong>A key is saved</strong> <span class="muted">(ending …${esc(ownKey().slice(-4))})</span></p>
+           <div class="actions"><button type="button" class="danger" id="own-key-remove">Remove key</button></div>`
+        : `<ol class="steps">
+             <li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio’s API keys page</a> and sign in with a Google account.</li>
+             <li>Choose “Create API key” and copy it. It’s free and needs no card.</li>
+             <li>Paste it here. It’s checked with one small request before it’s kept.</li>
+           </ol>
+           <form id="own-key-form" class="own-key-form">
+             <label for="own-key">Gemini API key</label>
+             <input id="own-key" name="key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key">
+             <button type="submit" class="primary">Check and save</button>
+           </form>`}
+      <p class="warn" id="own-key-error" role="alert"></p>
+    </section>`;
+}
+
+function bindOwnKeyCard() {
+  on('#own-key-form', 'submit', async e => {
+    e.preventDefault();
+    const key = String(new FormData(e.currentTarget).get('key') || '').trim();
+    const error = $('#own-key-error');
+    if (!key) { error.textContent = 'Paste a key first.'; return; }
+    const button = e.currentTarget.querySelector('button');
+    button.disabled = true;
+    button.textContent = 'Checking…';
+    const problem = await checkOwnKey(key);
+    if (problem) {
+      error.textContent = problem;
+      button.disabled = false;
+      button.textContent = 'Check and save';
+      return;
+    }
+    setOwnKey(key);
+    toast('Key saved. Hints now use your own allowance.');
+    viewSettings();
+  });
+  confirmButton('#own-key-remove', 'Click again to remove', () => {
+    setOwnKey('');
+    toast('Key removed');
+    viewSettings();
+  });
+}
+
 function viewSettings() {
   view.innerHTML = `
     ${pageHead('Settings', { eyebrow: APP_NAME })}
@@ -2515,6 +2570,7 @@ function viewSettings() {
         </section>`;
       }).join('')}
     </div>
+    ${settings.explain === 'on' ? ownKeyCardHtml() : ''}
     <div class="card">
       <h2>Sample</h2>
       <p class="hint">A question the way it will look with these settings.</p>
@@ -2531,6 +2587,7 @@ function viewSettings() {
       <div class="actions"><button class="danger" id="reset">Reset ${exam.name} progress</button></div>
     </div>`;
 
+  bindOwnKeyCard();
   on('[data-set]', 'click', e => {
     const { set, value } = e.currentTarget.dataset;
     if (settings[set] === value) return;

@@ -875,3 +875,9 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 
 /* Where a hint button would be for someone signed out: Gemini only answers signed-in students. */
 .hint-signin { align-self: center; font-weight: 600; color: var(--muted); }
+
+/* Bring-your-own Gemini key, in Settings. */
+.own-key .steps { margin: 8px 0 12px; padding-left: 20px; line-height: 1.6; }
+.own-key-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.own-key-form label { flex-basis: 100%; font-weight: 600; font-size: 14px; }
+.own-key-form input { flex: 1 1 260px; min-width: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
