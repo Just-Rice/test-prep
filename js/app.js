@@ -6,7 +6,7 @@ import {
 import { EXAMS, EXAM_IDS, NATIONAL_MERIT, examsOfQuestion, scoredSections, sectionOf, selectionIndex, skillsOf, totalScore } from './exams.js';
 import { addMistake, dueMistakes, reviewMistake } from './srs.js';
 import { applySettings, CHOICES, loadSettings, saveSettings } from './settings.js';
-import { answeredBefore, checkOwnKey, explainConfigured, explainKey, explainQuestion, hintFor, hintKey, ownKey, ownKeyAccount, setOwnKey } from './explain.js';
+import { answeredBefore, checkOwnKey, explainConfigured, explainKey, explainQuestion, hintFor, hintKey, keyAfterSignIn, ownKey, ownKeyAccount, setOwnKey } from './explain.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
 import { ORIGINAL_QUESTIONS } from './questions/index.js';
 import { MCAT_CP_LESSONS } from './lessons/mcat-cp.js';
@@ -2496,11 +2496,11 @@ async function syncOwnKey(uid) {
   const inAccount = await readAccountKey();
   if (inAccount === undefined || syncState().uid !== uid) return;   // couldn't be read, or someone else by now
   const here = ownKey();
-  if (inAccount) setOwnKey(inAccount, uid);
-  else if (here && !ownKeyAccount()) {
-    // Added on this device before signing in: it joins the account, as progress made signed out does.
-    try { await writeAccountKey(here); setOwnKey(here, uid); } catch { /* kept on this device for now */ }
-  } else if (here) setOwnKey('');   // removed from the account on another device
+  const next = keyAfterSignIn({ uid, inAccount, here, hereAccount: ownKeyAccount() });
+  if (next.upload) {
+    try { await writeAccountKey(next.key); } catch { return; }   // kept on this device, to try again next sign-in
+  }
+  setOwnKey(next.key, next.account);
   if (ownKey() !== here && ['settings', 'practice', 'review', 'mistakes'].includes(currentRoute)) render({ quiet: true });
 }
 

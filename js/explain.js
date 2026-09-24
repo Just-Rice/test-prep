@@ -36,6 +36,16 @@ export function ownKey() {
 export function ownKeyAccount() {
   try { return localStorage.getItem(OWN_KEY_ACCOUNT) || ''; } catch { return ''; }
 }
+// Where a student's key should end up once an account has signed in and its saved key (null for none) has
+// been read. The account's key wins; a key added on this device while signed out joins the account, as
+// progress made signed out does; a copy from this account that the account no longer has was removed on
+// another device, so it goes; one from another account never stays.
+export function keyAfterSignIn({ uid, inAccount, here, hereAccount }) {
+  if (inAccount) return { key: inAccount, account: uid, upload: false };
+  if (here && !hereAccount) return { key: here, account: uid, upload: true };
+  return { key: '', account: '', upload: false };
+}
+
 export function setOwnKey(key, account = '') {
   try {
     if (key) {
