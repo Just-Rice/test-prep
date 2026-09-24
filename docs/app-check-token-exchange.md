@@ -137,3 +137,29 @@ App Check page will show verified requests the moment the exchange starts workin
 
 If it is not fixed by mid-October, the app should stop calling Firebase AI Logic from the browser and call
 Gemini through a small relay of its own instead, which App Check does not govern.
+
+## Firebase Support's first reply, 24 September 2026
+
+Case 10426403. Support (Sandra) confirmed that billing is **not** required: without a billing account the project
+is on reCAPTCHA Enterprise's Essentials tier (10,000 assessments a month), so that is not the cause. Because the
+browser obtains a valid reCAPTCHA token but Firebase's server-side assessment fails, they suspect "a
+backend-to-backend authorization desync or an internal service agent binding issue" between App Check and
+reCAPTCHA Enterprise, and asked for:
+
+1. Disable the reCAPTCHA Enterprise API and the Firebase App Check API, wait 3–5 minutes, re-enable both, wait
+   about 10 minutes, then test in a fresh Incognito window.
+2. Check that the App Check service agent exists with roles/firebaseappcheck.serviceAgent.
+3. Check the key is a Website (score-based) key listing just-rice.github.io.
+
+What was checked the same day:
+
+- **Service agent: fine.** `service-1072588919531@gcp-sa-firebaseappcheck.iam.gserviceaccount.com` holds Firebase
+  App Check Service Agent, whose permissions include `recaptchaenterprise.assessments.create`.
+- **Key: fine.** "SAT prep" is Website · Score, domain `just-rice.github.io`, domain verification on, status
+  Protected. It records only 3 billable assessments this month despite many exchange attempts, which suggests
+  Firebase's backend is not reaching CreateAssessment at all.
+- **The API cycle was not done.** Both Disable dialogs warn that resources the API created "may be deleted soon
+  after" it is disabled. For reCAPTCHA Enterprise that includes the key itself; for App Check, the web app's
+  registration and enforcement settings. A reply asking support to confirm whether the cycle is safe (or to
+  re-provision the linkage from their side) was drafted for the owner to approve and send, with screenshots
+  of the IAM page and the key.
