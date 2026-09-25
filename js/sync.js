@@ -36,8 +36,8 @@ let stopListening = null;
 const state = { phase: syncConfigured ? 'loading' : 'off', message: null, lastSynced: null };
 
 // phase: 'off' (not configured) | 'loading' | 'signed-out' | 'syncing' | 'synced' | 'error'
-// guest: signed in by the owner's personal link rather than with an account (see signInAsGuest).
-export const syncState = () => ({ ...state, account: accountName(), uid: user?.uid ?? null, guest: Boolean(user?.isAnonymous) });
+// testAccount: the id of the owner's test account when that is who is signed in (see "the owner's test account").
+export const syncState = () => ({ ...state, account: accountName(), uid: user?.uid ?? null, testAccount: testAccountId(user) });
 
 function update(patch) {
   Object.assign(state, patch);
@@ -56,7 +56,7 @@ export async function initSync(appHooks, { loadSdk = loadFromCdn } = {}) {
   try {
     const { app, auth, firestore } = await loadSdk();
     const firebaseApp = app.initializeApp(FIREBASE_CONFIG);
-    fb = { auth, firestore, authInstance: auth.getAuth(firebaseApp), db: firestore.getFirestore(firebaseApp) };
+    fb = { app, auth, firestore, authInstance: auth.getAuth(firebaseApp), db: firestore.getFirestore(firebaseApp) };
     // The shared question library rides on the same app and the same sign-in as progress does.
     useFirebase(fb);
   } catch {
@@ -249,12 +249,76 @@ export async function signInWithUsername(username, passcode, { create = false } 
   await authAction(() => action(fb.authInstance, email, passcode));
 }
 
-// The owner's personal link gives a device the shared library without an account. Firebase's anonymous sign-in
-// stands in for one: the device gets an account of its own, with no name or passcode, which then joins the tester
-// list with the link's code. It lasts until this browser's site data is cleared or it signs out.
-export async function signInAsGuest() {
+// ---------- the owner's test account ----------
+//
+// The owner's personal link signs a browser in to one test account, kept for trying the app the way a tester would:
+// its own progress, saved and synced like any account's, on every device that opens the link. It is an ordinary
+// username-and-passcode account whose name and passcode come from the link itself: the code's first 8 characters
+// name the account and the rest are its passcode. The name has a "+" in it, which the username form never allows,
+// so nobody can take it by signing up, and it appears nowhere but in the link. The first browser to open the link
+// makes the account.
+
+const TEST_PREFIX = 'test+';
+export const TEST_ID_LENGTH = 8;
+const testAccountEmail = id => `${TEST_PREFIX}${id}@${USERNAME_DOMAIN}`;
+function testAccountId(someone) {
+  const email = someone?.email || '';
+  return email.startsWith(TEST_PREFIX) && email.endsWith(`@${USERNAME_DOMAIN}`)
+    ? email.slice(TEST_PREFIX.length, -(USERNAME_DOMAIN.length + 1)) : null;
+}
+// What Firebase says when an address and passcode don't match an account, whichever of the two is wrong.
+const NO_ACCOUNT = ['auth/invalid-credential', 'auth/invalid-login-credentials', 'auth/user-not-found', 'auth/wrong-password'];
+const LINK_CHANGED = 'This link doesn’t work any more: it has been changed since. Copy the current one from your Library page.';
+
+// Signs in with a passcode, or makes the account with it if there isn't one yet. An account that exists with a
+// different passcode belongs to a link that has since been changed.
+export async function signInOrCreate(auth, instance, email, passcode) {
+  try {
+    return await auth.signInWithEmailAndPassword(instance, email, passcode);
+  } catch (err) {
+    if (!NO_ACCOUNT.includes(err?.code)) throw new Error(describeError(err));
+  }
+  try {
+    return await auth.createUserWithEmailAndPassword(instance, email, passcode);
+  } catch (err) {
+    throw new Error(err?.code === 'auth/email-already-in-use' ? LINK_CHANGED : describeError(err));
+  }
+}
+
+export async function signInToTestAccount(id, passcode) {
   if (!fb) throw new Error('Still connecting. Try the link again in a moment.');
-  await authAction(() => fb.auth.signInAnonymously(fb.authInstance));
+  await signInOrCreate(fb.auth, fb.authInstance, testAccountEmail(id), passcode);
+}
+
+// Gives the test account a new passcode, for a new personal link, without disturbing whoever is signed in here: the
+// change is made over a second, short-lived connection that keeps nothing. Other browsers signed in with the old link
+// are signed out within the hour, when Firebase next checks their sign-in. If nobody has opened the link yet there is
+// no account to change, so it is made now, with the new passcode.
+export async function changeTestAccountPasscode(id, oldPasscode, newPasscode) {
+  if (!fb) throw new Error('Still connecting. Try again in a moment.');
+  const { app, auth } = fb;
+  const second = app.initializeApp(FIREBASE_CONFIG, `test-account-${Date.now()}`);
+  try {
+    const instance = auth.initializeAuth(second, { persistence: auth.inMemoryPersistence });
+    const email = testAccountEmail(id);
+    let signedIn = null;
+    try {
+      signedIn = await auth.signInWithEmailAndPassword(instance, email, oldPasscode);
+    } catch (err) {
+      if (!NO_ACCOUNT.includes(err?.code)) throw new Error(describeError(err));
+    }
+    if (signedIn) {
+      await auth.updatePassword(signedIn.user, newPasscode).catch(err => { throw new Error(describeError(err)); });
+    } else {
+      await auth.createUserWithEmailAndPassword(instance, email, newPasscode).catch(err => {
+        throw new Error(err?.code === 'auth/email-already-in-use'
+          ? 'The test account’s passcode doesn’t match the saved link, so the link couldn’t be changed.' : describeError(err));
+      });
+    }
+    await auth.signOut(instance);
+  } finally {
+    await app.deleteApp(second).catch(() => {});
+  }
 }
 
 export async function signOutOfSync() {
@@ -266,7 +330,7 @@ export async function signOutOfSync() {
 
 function accountName() {
   if (!user) return null;
-  if (user.isAnonymous) return 'Personal link';
+  if (testAccountId(user)) return 'Test account';
   const email = user.email || '';
   if (email.endsWith(`@${USERNAME_DOMAIN}`)) return email.slice(0, -(USERNAME_DOMAIN.length + 1));
   return user.displayName || email || 'your account';
@@ -295,7 +359,6 @@ const MESSAGES = {
   'auth/network-request-failed': 'Could not reach the sign-in service. Check your internet connection.',
   'auth/unauthorized-domain': "This site's address isn't on the Firebase project's list of authorized domains.",
   'auth/operation-not-allowed': "That sign-in method isn't turned on in the Firebase project.",
-  'auth/admin-restricted-operation': "That sign-in method isn't turned on in the Firebase project.",
   'auth/api-key-not-valid.-please-pass-a-valid-api-key.': "The Firebase settings in js/firebase-config.js aren't valid.",
   'auth/invalid-api-key': "The Firebase settings in js/firebase-config.js aren't valid.",
   'permission-denied': 'The cloud database refused access. Check the Firestore security rules.',

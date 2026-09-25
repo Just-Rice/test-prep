@@ -14,12 +14,12 @@ import { MCAT_CP_LESSONS } from './lessons/mcat-cp.js';
 import { mountCalculator } from './calc.js';
 import { currentStreak, dayKey, longestStreak } from './streak.js';
 import {
-  initSync, readAccountKey, schedulePush, signInAsGuest, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState,
-  writeAccountKey,
+  changeTestAccountPasscode, initSync, readAccountKey, schedulePush, signInToTestAccount, signInWithGoogle, signInWithUsername,
+  signOutOfSync, syncConfigured, syncState, TEST_ID_LENGTH, writeAccountKey,
 } from './sync.js';
 import {
   joinWithCode, libraryAccess, listTesters, loadCloudQuestions, MIN_CODE, MIN_PERSONAL_CODE, pictureUrl, plainCode, publishLibrary,
-  readInviteCodes, removeTester, saveInviteCode, savePersonalCode,
+  readInviteCodes, removeTester, saveInviteCode, savePersonalLink,
 } from './library-cloud.js';
 import { decodeLibrary, pictureIds } from './library-bundle.js';
 import { importPdf } from './import-pdf.js';
@@ -402,34 +402,64 @@ function toast(message) {
 
 // ---------- opened inside another page ----------
 //
-// Test Prep can be opened inside another page, such as an about:blank tab that shows it in a frame. It works there,
-// but the browser gives a page shown that way its own separate saved data: progress, settings and sign-in from Test
+// Test Prep can be opened inside another page, such as an about:blank tab that shows it in a frame. Made by some
+// other site, a page like that gets saved data of its own from the browser: progress, settings and sign-in from Test
 // Prep in a normal tab aren't there, and inside a bare about:blank tab whatever is saved is forgotten when the tab
-// closes. Signing in solves both, because progress then comes from the account, so the page says so until the
-// student signs in or dismisses it.
+// closes. So the app says so, and offers its own about:blank tab instead (openInBlankTab), which belongs to this site
+// and so shares everything with a normal tab.
 const framed = (() => { try { return window.self !== window.top; } catch { return true; } })();
+// Whether the page around this one belongs to this site, like Test Prep's own about:blank tab. Only then can this
+// page reach into it; a page from anywhere else refuses.
+const framedByThisSite = framed && (() => { try { return Boolean(window.top.document); } catch { return false; } })();
 // A frame whose outer page has no address of its own (a bare about:blank tab) keeps nothing once it closes.
-const framedInBlank = framed && [...(location.ancestorOrigins ?? [])].includes('null');
+const framedInBlank = framed && !framedByThisSite && [...(location.ancestorOrigins ?? [])].includes('null');
 const FRAME_NOTE_KEY = 'satprep.frameNote';
 let frameNoteDismissed = false;
 try { frameNoteDismissed = sessionStorage.getItem(FRAME_NOTE_KEY) === 'dismissed'; } catch { /* storage unavailable */ }
 
+// Opens the app in a new tab whose address reads about:blank. This page makes the tab, so the tab belongs to this
+// site, and the app inside it has the same saved progress, settings and sign-in as a normal tab: everything done there
+// is saved. The tab's content can't survive a reload, since reloading about:blank gives an empty page.
+function openInBlankTab(route = 'home') {
+  const tab = window.open('about:blank', '_blank');
+  if (!tab) return toast('Your browser blocked the new tab. Allow pop-ups for this site, then try again.');
+  const doc = tab.document;
+  doc.title = APP_NAME;
+  const icon = doc.createElement('link');
+  icon.rel = 'icon';
+  icon.href = document.querySelector('link[rel="icon"]')?.href ?? '';
+  doc.head.appendChild(icon);
+  doc.body.style.margin = '0';
+  const frame = doc.createElement('iframe');
+  frame.src = `${location.href.split('#')[0]}#/${route}`;
+  frame.title = APP_NAME;
+  frame.allow = 'clipboard-read; clipboard-write; fullscreen';
+  frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;display:block';
+  doc.body.appendChild(frame);
+  frame.focus();
+}
+
 function frameNoteHtml() {
-  if (!framed || frameNoteDismissed || (syncConfigured && syncState().account)) return '';
+  if (!framed || framedByThisSite || frameNoteDismissed) return '';
   const normalTab = location.href.split('#')[0];
   const kept = framedInBlank
     ? 'Your progress from a normal tab isn’t here, and anything you do here is forgotten when this tab closes.'
     : 'Your progress from a normal tab isn’t here, and what you do here won’t show up there.';
   return `<div class="note frame-note" role="note">
-      <p><strong>${APP_NAME} is open inside another page</strong>, such as an about:blank tab. It works here, but your
-        browser keeps this page’s saved data separate. ${kept}${syncConfigured ? ' Sign in, and your progress comes from your account wherever you open it.' : ''}</p>
+      <p><strong>${APP_NAME} is open inside another page</strong>, such as an about:blank tab made by another site. Your
+        browser keeps this page’s saved data separate. ${kept} To keep everything, reopen ${APP_NAME} in its own
+        about:blank tab or a normal tab${syncConfigured && !syncState().account ? ', or sign in here' : ''}.</p>
       <div class="actions">
-        ${syncConfigured && currentRoute !== 'account' ? '<a class="button primary small" href="#/account">Sign in</a>' : ''}
+        <button type="button" class="primary small" data-open-blank>Reopen in its own about:blank tab</button>
         <a class="button small" href="${esc(normalTab)}" target="_blank" rel="noopener">Open in a normal tab</a>
+        ${syncConfigured && !syncState().account && currentRoute !== 'account' ? '<a class="button small" href="#/account">Sign in</a>' : ''}
         <button type="button" class="ghost small" data-frame-note-dismiss>Dismiss</button>
       </div>
     </div>`;
 }
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-open-blank]')) openInBlankTab(e.target.closest('[data-open-blank]').dataset.openBlank || currentRoute || 'home');
+});
 document.addEventListener('click', e => {
   if (!e.target.closest('[data-frame-note-dismiss]')) return;
   frameNoteDismissed = true;
@@ -472,6 +502,7 @@ function render({ quiet = false } = {}) {
   if (!progress.profile.mode && !['library', 'resources', 'settings', 'start', 'placement', 'placed', 'account', 'learn', 'cards', 'import', ...JOIN_ROUTES].includes(route)) return go('start');
   if (session && !sessionBelongsTo(route)) session = null;
   document.title = `${ROUTES[route][1]} · ${exam.name} · ${APP_NAME}`;
+  if (framedByThisSite) try { window.top.document.title = document.title; } catch { /* the outer page went away */ }
   renderNav(route);
   if (!quiet) window.scrollTo(0, 0);   // a quiet redraw must not throw away where somebody was reading
   ROUTES[route][0](arg);
@@ -656,7 +687,8 @@ function paletteItems() {
     .filter(k => pool.some(q => q.section === s.id && q.skill === k.name))
     .map(k => ({ label: skillLabel(k.name), hint: `Practice · ${s.name}`, skill: k.name, section: s.id })));
   const tests = EXAM_IDS.filter(id => id !== examId).map(id => ({ label: `Switch to ${EXAMS[id].long}`, hint: 'Test', exam: id }));
-  return [...pages, ...skills, ...tests];
+  const actions = framed ? [] : [{ label: 'Open in an about:blank tab', hint: 'Action', run: () => openInBlankTab(currentRoute || 'home') }];
+  return [...pages, ...skills, ...tests, ...actions];
 }
 
 function openPalette() {
@@ -693,6 +725,7 @@ function openPalette() {
   const choose = item => {
     dialog.close();
     if (!item) return;
+    if (item.run) return item.run();
     if (item.exam) return setExam(item.exam);
     if (item.skill) {
       session = { kind: 'practice', section: item.section, skill: item.skill, done: 0, correct: 0, q: null };
@@ -2554,39 +2587,38 @@ const joinAddress = (kind, code) => `${location.origin}${location.pathname}#/${k
 function testersPanel(panel) {
   if (!panel) return '<h3>Invite links</h3><p class="hint">Loading…</p>';
   if (panel.error) return `<h3>Invite links</h3><p class="warn">${esc(panel.error)}</p>`;
-  const linkRow = (id, kind, code) => `<div class="link-row">
-      <input id="${id}" readonly value="${esc(joinAddress(kind, code))}" aria-label="${kind === 'personal' ? 'Your personal link' : 'Tester link'}">
+  const linkRow = (id, label, address) => `<div class="link-row">
+      <input id="${id}" readonly value="${esc(address)}" aria-label="${label}">
       <button type="button" data-copy="#${id}">Copy link</button>
     </div>`;
-  // Devices that joined with the personal link are named after it, so they can be told apart from testers.
-  const personalDevice = t => t.name.startsWith(PERSONAL_NAME);
-  const listOf = (people, empty) => (people.length
-    ? `<ul class="tester-list">${people.map(t => `
-        <li><span>${esc(t.name || 'An account with no name')}</span>
-          <span class="hint">${t.joinedAt ? `joined ${new Date(t.joinedAt).toLocaleDateString()}` : 'added by hand'}</span>
-          <button type="button" class="link" data-remove-tester="${esc(t.uid)}">Remove</button></li>`).join('')}</ul>`
-    : `<p class="hint">${empty}</p>`);
+  const personalReady = panel.personal && panel.personalId;
+  // Entries from the guest links this replaced, which no longer sign anyone in.
+  const oldGuest = t => t.name.startsWith('Personal link ·');
   return `<h3>Tester link</h3>
     <p class="hint">Send this to testers. It asks them to sign in or create an account, then gives them the whole library.
       Changing the code stops the old link working for anyone new; everyone already in keeps their access.</p>
-    ${panel.code ? linkRow('tester-link', 'invite', panel.code) : '<p class="hint">Choose a code below to make the link.</p>'}
+    ${panel.code ? linkRow('tester-link', 'Tester link', joinAddress('invite', panel.code)) : '<p class="hint">Choose a code below to make the link.</p>'}
     <form class="code-form" id="invite-form">
       <label for="invite-new">Code</label>
       <input id="invite-new" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(panel.code ? readableCode(panel.code) : suggestCode())}">
       <button type="submit">${panel.code ? 'Change code' : 'Save code'}</button>
     </form>
     <h3>Your personal link</h3>
-    <p class="hint">For your own devices and for testing. Opening it gives that browser the whole library straight away,
-      without signing in. Anyone who has it gets in, so keep it to yourself; change it if it gets out.</p>
-    ${panel.personal ? linkRow('personal-link', 'personal', panel.personal) : ''}
-    <form class="code-form" id="personal-form">
-      <label for="personal-new">Code</label>
-      <input id="personal-new" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(panel.personal ? readableCode(panel.personal) : suggestCode(16))}">
-      <button type="submit"${panel.personal ? '' : ' class="primary"'}>${panel.personal ? 'Change link' : 'Make my personal link'}</button>
-    </form>
+    <p class="hint">For your own devices and for testing. Opening it signs that browser in to your test account: one
+      account with its own progress, saved and synced on every device that uses the link, and the whole library. Anyone
+      who has the link gets in, so keep it to yourself, and change it if it gets out.</p>
+    ${personalReady
+      ? `${linkRow('personal-link', 'Your personal link', joinAddress('personal', `${panel.personalId}${panel.personal}`))}
+         <div class="actions"><button type="button" id="personal-change">Change link</button></div>
+         <p class="hint">Changing it keeps the test account and its progress. The old link stops working, and browsers
+           signed in with it are signed out within the hour.</p>`
+      : '<div class="actions"><button type="button" class="primary" id="personal-make">Make my personal link</button></div>'}
     <h3>Who has joined</h3>
-    ${listOf(panel.testers.filter(t => !personalDevice(t)), 'No testers have joined yet.')}
-    ${panel.testers.some(personalDevice) ? `<h3>Devices using your personal link</h3>${listOf(panel.testers.filter(personalDevice), '')}` : ''}`;
+    ${panel.testers.length ? `<ul class="tester-list">${panel.testers.map(t => `
+        <li><span>${esc(t.name || 'An account with no name')}${t.name === TEST_ACCOUNT_NAME ? ' <span class="pill">your personal link</span>' : ''}</span>
+          <span class="hint">${t.joinedAt ? `joined ${new Date(t.joinedAt).toLocaleDateString()}` : 'added by hand'}</span>
+          <button type="button" class="link" data-remove-tester="${esc(t.uid)}">Remove</button></li>`).join('')}</ul>` : '<p class="hint">Nobody has joined yet.</p>'}
+    ${panel.testers.some(oldGuest) ? '<p class="hint">Entries named “Personal link · …” came from the old guest links, which no longer work, so they can be removed.</p>' : ''}`;
 }
 
 // Shown in groups of four so it is easy to read out; it is compared without the dashes, so either works.
@@ -2627,17 +2659,33 @@ function bindSharedLibraryCard() {
       toast(err.message);
     }
   });
-  on('#personal-form', 'submit', async e => {
-    e.preventDefault();
-    if (plainCode($('#personal-new').value).length < MIN_PERSONAL_CODE) {
-      return toast(`Your personal link needs a code of at least ${MIN_PERSONAL_CODE} letters or numbers, since it works without signing in.`);
-    }
+  // The personal link: made once, then changed only by giving the test account a new passcode (sync.js).
+  on('#personal-make', 'click', async e => {
+    const panel = cloudLibrary.admin;
+    e.currentTarget.disabled = true;
     try {
-      await savePersonalCode($('#personal-new').value);
-      toast('Personal link saved. Copy it below.');
+      await savePersonalLink(plainCode(suggestCode(TEST_ID_LENGTH)), panel?.personal ?? plainCode(suggestCode(16)));
+      toast('Your personal link is ready. Copy it below.');
       loadTestersPanel();
     } catch (err) {
       toast(err.message);
+      e.currentTarget.disabled = false;
+    }
+  });
+  confirmButton('#personal-change', 'Click again to change it', async button => {
+    const panel = cloudLibrary.admin;
+    const passcode = plainCode(suggestCode(16));
+    button.disabled = true;
+    button.textContent = 'Changing…';
+    try {
+      await changeTestAccountPasscode(panel.personalId, panel.personal, passcode);
+      await savePersonalLink(panel.personalId, passcode);
+      toast('Link changed. Copy the new one below; the old one no longer works.');
+      loadTestersPanel();
+    } catch (err) {
+      toast(err.message);
+      button.disabled = false;
+      button.textContent = 'Change link';
     }
   });
   on('[data-copy]', 'click', async e => {
@@ -2706,16 +2754,17 @@ async function uploadSharedLibrary(button) {
 
 // ---------- invite links ----------
 //
-// Two links bring a device into the shared library (see library-cloud.js). The tester link asks for an account,
-// then joins it; the owner's personal link joins straight away, with no account. The code comes out of the address
-// as soon as the page opens, so it isn't left in the browser's history, and is kept for this tab until the device
-// has joined, since the tester link has to wait for somebody to sign in first. syncCloudLibrary does the joining.
+// Two links bring a browser into the shared library (see library-cloud.js). The tester link asks for an account and
+// then joins it. The owner's personal link signs the browser in to the owner's test account (see "the owner's test
+// account" in sync.js), which joins the first time. The code comes out of the address as soon as the page opens, so
+// it isn't left in the browser's history, and is kept for this tab until it has been used, since the tester link has
+// to wait for somebody to sign in first. syncCloudLibrary does the joining.
 
 const JOIN_KEY = 'satprep.join';
-const PERSONAL_NAME = 'Personal link';
-let joinLink = null;       // { kind: 'invite' | 'personal', code } until the device has joined
+const TEST_ACCOUNT_NAME = 'Test account';
+let joinLink = null;       // { kind: 'invite' | 'personal', code } until it has been used
 let joinProblem = null;    // why the last link didn't work, shown on its page
-let startingGuest = false;
+let signingInToTest = false;
 
 function pendingJoin() {
   if (!joinLink) {
@@ -2732,32 +2781,36 @@ function forgetJoin() {
   try { sessionStorage.removeItem(JOIN_KEY); } catch { /* storage unavailable */ }
 }
 
-// What the tester list calls a device that joined with the personal link, since it has no account name.
-function deviceName() {
-  const ua = navigator.userAgent;
-  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\/|FxiOS/.test(ua) ? 'Firefox'
-    : /Chrome\/|CriOS/.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'a browser';
-  const system = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android'
-    : /CrOS/.test(ua) ? 'Chromebook' : /Mac OS X/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : '';
-  return system ? `${browser} on ${system}` : browser;
+// A personal link's code: the test account's name, then its passcode (see sync.js). Null for anything too short,
+// such as a link from before the test account, or one cut off when it was copied.
+function personalParts(code) {
+  const plain = plainCode(code);
+  if (plain.length < TEST_ID_LENGTH + MIN_PERSONAL_CODE) return null;
+  return { id: plain.slice(0, TEST_ID_LENGTH), passcode: plain.slice(TEST_ID_LENGTH) };
+}
+// Whether the account signed in now is the one a link is for, and so the one that should use it.
+function linkFits(link, sync) {
+  if (!sync.account) return false;
+  return link.kind === 'personal' ? sync.testAccount === personalParts(link.code)?.id : true;
 }
 
-// The personal link works without an account, so a device that opens it signed out signs in as a guest; joining
-// follows once that sign-in lands (syncCloudLibrary). Called when the page opens and again once a saved sign-in has
-// been restored, since until then it isn't known whether this device is signed in already.
-function continueJoin() {
+// Signs this browser in to the test account. Called when a personal link's page opens and again once a saved sign-in
+// has been restored, since until then it isn't known whether somebody is signed in here already; if they are, the
+// page asks before switching (viewJoin).
+function continueJoin({ switching = false } = {}) {
   const link = pendingJoin();
-  if (!syncConfigured || link?.kind !== 'personal' || startingGuest) return;
+  if (!syncConfigured || link?.kind !== 'personal' || signingInToTest) return;
   const sync = syncState();
-  if (sync.phase === 'loading' || sync.account) return;
-  startingGuest = true;
-  signInAsGuest()
+  if (sync.phase === 'loading' || linkFits(link, sync) || (sync.account && !switching)) return;
+  const parts = personalParts(link.code);
+  signingInToTest = true;
+  signInToTestAccount(parts.id, parts.passcode)
     .catch(err => {
       forgetJoin();
-      joinProblem = err.message || 'This device couldn’t be set up with the link. Try opening it again.';
+      joinProblem = err.message || 'This browser couldn’t sign in to the test account. Try opening the link again.';
       if (JOIN_ROUTES.includes(currentRoute)) render({ quiet: true });
     })
-    .finally(() => { startingGuest = false; });
+    .finally(() => { signingInToTest = false; });
 }
 
 // Joins the tester list with the link waiting in this tab. Returns the access it gave, or null.
@@ -2765,9 +2818,10 @@ async function joinFromLink(uid, link) {
   forgetJoin();
   cloudLibrary = { status: 'joining', access: null };
   refreshForLibrary();
+  const personal = link.kind === 'personal';
   try {
-    await joinWithCode(uid, link.code, link.kind === 'personal' ? `${PERSONAL_NAME} · ${deviceName()}` : syncState().account, { link: true });
-    toast(link.kind === 'personal' ? 'This device is in. Loading the shared library…' : 'You’re in. Loading the shared library…');
+    await joinWithCode(uid, personal ? personalParts(link.code).passcode : link.code, personal ? TEST_ACCOUNT_NAME : syncState().account, { link: true });
+    toast('You’re in. Loading the shared library…');
     return 'tester';
   } catch (err) {
     joinProblem = err.message;
@@ -2776,18 +2830,18 @@ async function joinFromLink(uid, link) {
 }
 
 function viewJoin(kind, code) {
-  const plain = plainCode(code);
-  if (plain) {
-    rememberJoin({ kind, code: plain });
-    joinProblem = null;
+  if (code) {
+    const usable = kind === 'personal' ? personalParts(code) : plainCode(code).length >= MIN_CODE;
+    joinProblem = usable ? null : 'This link isn’t complete: part of it may have been cut off when it was copied. Copy the whole link and open it again.';
+    if (usable) rememberJoin({ kind, code: plainCode(code) });
     history.replaceState(null, '', `#/${kind}`);
     cloudLibraryFor = null;      // look again, now that there is a link to join with
-    if (syncConfigured && syncState().uid) syncCloudLibrary(syncState());
+    if (usable && syncConfigured && syncState().uid) syncCloudLibrary(syncState());
   }
   const personal = kind === 'personal';
   const link = pendingJoin();
   const sync = syncConfigured ? syncState() : null;
-  const head = pageHead(personal ? 'Your personal link' : 'You’re invited', { eyebrow: APP_NAME });
+  const head = pageHead(personal ? 'Your test account' : 'You’re invited', { eyebrow: APP_NAME });
   const next = '<div class="actions"><a class="button primary" href="#/home">Start studying</a></div>';
   if (!sync) {
     view.innerHTML = `${head}<p class="note">This copy of ${APP_NAME} has no shared library, so there is nothing to join.</p>`;
@@ -2799,13 +2853,27 @@ function viewJoin(kind, code) {
     return;
   }
   if (sync.phase === 'loading' || (link?.kind === 'personal' && !sync.account)) {
-    view.innerHTML = `${head}<p class="muted">${link?.kind === 'personal' ? 'Setting up this device…' : 'Connecting…'}</p>`;
+    view.innerHTML = `${head}<p class="muted">${link?.kind === 'personal' ? 'Signing in to your test account…' : 'Connecting…'}</p>`;
     continueJoin();
     return;
   }
-  // The tester link needs an account: signed out, or only a guest from the personal link, the student signs in here
-  // first, and joins the moment they do.
-  if (link?.kind === 'invite' && (!sync.account || sync.guest)) {
+  // Signed in as somebody else: the personal link would sign them out, so it asks first.
+  if (link?.kind === 'personal' && !linkFits(link, sync)) {
+    view.innerHTML = `${head}
+      <p class="lede">This browser is signed in as <strong>${esc(sync.account)}</strong>. Your personal link signs it in to
+        your test account instead, which has its own progress.</p>
+      <div class="actions"><button class="primary" id="switch-to-test">Switch to the test account</button>
+        <button id="stay">Stay signed in as ${esc(sync.account)}</button></div>`;
+    on('#switch-to-test', 'click', e => {
+      e.currentTarget.disabled = true;
+      e.currentTarget.textContent = 'Switching…';
+      continueJoin({ switching: true });
+    });
+    on('#stay', 'click', () => { forgetJoin(); go('home'); });
+    return;
+  }
+  // The tester link needs an account, so the student signs in here first, and joins the moment they do.
+  if (link?.kind === 'invite' && !sync.account) {
     view.innerHTML = `${head}
       <p class="lede">You’ve been invited to ${APP_NAME}’s shared library: official College Board and ACT practice
         questions, on top of the ones built into the site.</p>
@@ -2821,7 +2889,7 @@ function viewJoin(kind, code) {
     return;
   }
   view.innerHTML = `${head}
-    <p class="muted">${sync.guest ? 'This device is using your personal link, without an account.' : `Signed in as ${esc(sync.account)}.`}</p>
+    <p class="muted">${sync.testAccount ? 'This browser is signed in to your test account. Its progress is its own, and is saved on every device that opens your personal link.' : `Signed in as ${esc(sync.account)}.`}</p>
     ${sharedLibraryCard()}
     ${next}`;
   bindSharedLibraryCard();
@@ -3072,6 +3140,16 @@ function viewSettings() {
       return cards ? `<h2 class="settings-heading">${heading}</h2><div class="settings-grid">${cards}</div>` : '';
     }).join('')}
     ${settings.explain === 'on' ? ownKeyCardHtml() : ''}
+    <h2 class="settings-heading">This browser</h2>
+    <div class="settings-grid"><section class="card setting">
+      <h3>Open in an about:blank tab</h3>
+      ${framed
+        ? `<p class="hint">${framedByThisSite ? 'This is Test Prep’s about:blank tab. Everything you do here is saved, just as in a normal tab.' : 'Test Prep is inside another page right now. The note at the top of the page can reopen it in its own about:blank tab.'}</p>`
+        : `<p class="hint">Opens Test Prep in a new tab whose address bar shows about:blank. Your progress, settings and
+            sign-in are the same as in a normal tab, so everything you do there is saved. Reloading that tab empties it;
+            open it again from here, or with “Jump to”.</p>
+           <div class="actions"><button type="button" data-open-blank="home">Open in an about:blank tab</button></div>`}
+    </section></div>
     <div class="card">
       <h2>Sample</h2>
       <p class="hint">A question the way it will look with these settings.</p>
@@ -3233,25 +3311,6 @@ function viewAccount() {
     view.innerHTML = `${pageHead('Account')}<p class="muted">Connecting…</p>`;
     return;
   }
-  // A device on the owner's personal link has no account to show, but can sign in to one from here.
-  if (sync.guest) {
-    view.innerHTML = `
-      ${pageHead('Account')}
-      <div class="card">
-        <h2>This device uses your personal link</h2>
-        <p>It has the shared library without being signed in to an account. Progress made here is kept for this
-          device, and backed up, but not with your account.</p>
-        <div class="actions"><button class="danger" id="sign-out">Stop using the link here</button></div>
-        <p class="hint">Stopping takes the shared library off this device, and the progress made here with the link can’t be
-          brought back afterwards. Opening your personal link here again gets the library back, starting fresh.</p>
-      </div>
-      <h2>Sign in to your account instead</h2>
-      <p class="muted">This device switches to your account and its progress. What was done here with the link stays with the link.</p>
-      ${signInFormsHtml(sync)}`;
-    confirmButton('#sign-out', 'Click again to stop', () => signOutOfSync());
-    bindSignInForms();
-    return;
-  }
   if (sync.account) {
     const time = sync.lastSynced && new Date(sync.lastSynced).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const status = sync.phase === 'error' ? sync.message : sync.phase === 'synced' ? `Up to date${time ? ` · last synced ${time}` : ''}.` : 'Syncing…';
@@ -3259,6 +3318,7 @@ function viewAccount() {
       ${pageHead('Account')}
       <div class="card">
         <p>Signed in as <strong>${esc(sync.account)}</strong>.</p>
+        ${sync.testAccount ? '<p class="hint">This is your test account, from your personal link. Its progress is its own, and is saved on every device that opens the link. To use your own account here instead, sign out, then sign in.</p>' : ''}
         <p class="${sync.phase === 'error' ? 'warn' : 'muted'}">${esc(status)}</p>
         <p class="hint">Progress for every test (${EXAM_IDS.map(id => EXAMS[id].name).join(', ')}) syncs automatically to every device where you sign in. Your changes upload within a few seconds, and changes from your other devices show up on their own.</p>
         <div class="actions">
@@ -3392,7 +3452,7 @@ function refreshForLibrary({ questionsChanged = false } = {}) {
 let cloudLibraryFor = null;   // the uid whose library has been looked up already
 
 // The shared questions belong to whichever account loaded them. They go when it signs out, and when another
-// account takes its place without signing out in between, which a guest on the personal link can do by signing in.
+// account takes its place without signing out in between, which opening the personal link can do.
 function dropCloudQuestions() {
   if (!cloudQuestions.length) return false;
   cloudQuestions = [];
@@ -3417,11 +3477,11 @@ async function syncCloudLibrary({ uid }) {
   refreshForLibrary({ questionsChanged: switched });
   let access = await libraryAccess(uid);
   if (stale()) return;
-  // A link waiting in this tab (see "invite links"): already in, there is nothing to join; otherwise join with it.
-  // The tester link waits for an account, so a personal-link guest keeps it until they sign in with one.
+  // A link waiting in this tab (see "invite links"): already in, there is nothing to join; otherwise join with it, as
+  // long as this is the account it is for. A personal link waits while its page asks whether to switch accounts.
   const link = pendingJoin();
-  if (link && access) forgetJoin();
-  else if (link && (link.kind === 'personal' || !syncState().guest)) {
+  if (link && access && linkFits(link, syncState())) forgetJoin();
+  else if (link && !access && linkFits(link, syncState())) {
     access = await joinFromLink(uid, link);
     if (stale()) return;
     if (JOIN_ROUTES.includes(currentRoute)) render({ quiet: true });

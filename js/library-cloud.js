@@ -68,14 +68,15 @@ export async function libraryAccess(uid) {
 // ---------- invite codes and links ----------
 //
 // Testers can join with a code instead of being added by hand. There are two, both chosen by the admin and kept
-// at settings/invite, which only an admin may read; firestore.rules compares what a device sends against them
+// at settings/invite, which only an admin may read; firestore.rules compares what an account sends against them
 // before letting it onto the testers/ list, so neither code has to be sent to anyone's browser to be checked.
 //
-//   code       the tester code, sent as a link (#/invite/<code>). It works only for someone signed in with an
-//              account, so every tester has one and their progress follows them.
-//   personal   the owner's personal link (#/personal/<code>), for their own devices and for testing. It works
-//              without an account: the device signs in as a guest (see signInAsGuest in sync.js) and joins.
-//              Anyone holding it gets in, so it is longer and kept to the owner.
+//   code         the tester code, sent as a link (#/invite/<code>). Testers sign in with their own account, then
+//                join with it.
+//   personal     the owner's personal link (#/personal/<personalId><personal>), which signs a browser in to the
+//   personalId   owner's test account (see "the owner's test account" in sync.js): personalId names the account
+//                and personal is both its passcode and the code it joins with. Anyone holding the link gets in, so
+//                it is long and kept to the owner.
 //
 // Codes are compared without case, spaces or dashes, so "K7M2-X9QP" and "k7m2x9qp" are the same.
 
@@ -103,20 +104,26 @@ export async function readInviteCodes() {
   const { doc, getDoc } = fb.firestore;
   const snap = await getDoc(doc(fb.db, 'settings', 'invite'));
   const data = snap.exists() ? snap.data() : {};
-  return { code: data.code || null, personal: data.personal || null };
+  return { code: data.code || null, personal: data.personal || null, personalId: data.personalId || null };
 }
 
-// Each code is saved on its own; changing one leaves the other as it was.
-async function saveCode(field, code, minimum) {
-  const plain = plainCode(code);
-  if (plain.length < minimum) throw new Error(`It needs at least ${minimum} letters or numbers, so it can’t be guessed.`);
+// Each link is saved on its own; changing one leaves the other as it was.
+async function saveInvite(fields) {
   const { doc, setDoc } = fb.firestore;
-  await setDoc(doc(fb.db, 'settings', 'invite'), { [field]: plain, changedAt: new Date().toISOString() }, { merge: true });
+  await setDoc(doc(fb.db, 'settings', 'invite'), { ...fields, changedAt: new Date().toISOString() }, { merge: true });
+}
+
+export async function saveInviteCode(code) {
+  const plain = plainCode(code);
+  if (plain.length < MIN_CODE) throw new Error(`It needs at least ${MIN_CODE} letters or numbers, so it can’t be guessed.`);
+  await saveInvite({ code: plain });
   return plain;
 }
 
-export const saveInviteCode = code => saveCode('code', code, MIN_CODE);
-export const savePersonalCode = code => saveCode('personal', code, MIN_PERSONAL_CODE);
+export async function savePersonalLink(id, passcode) {
+  if (plainCode(passcode).length < MIN_PERSONAL_CODE) throw new Error(`The passcode needs at least ${MIN_PERSONAL_CODE} letters or numbers.`);
+  await saveInvite({ personalId: plainCode(id), personal: plainCode(passcode) });
+}
 
 export async function listTesters() {
   const { collection, getDocs } = fb.firestore;
