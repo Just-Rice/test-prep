@@ -1,4 +1,4 @@
-// The original questions, gathered into one list: 400 for the SAT and, so far, 60 for the MCAT.
+// The original questions, gathered into one list: 400 for the SAT and 272 for the MCAT.
 //
 // These are written for this app rather than taken from the College Board bank, so unlike the PDF exports in
 // exports/ they live in the repo and reach everyone who opens the site. Without them a visitor who has not
@@ -17,6 +17,12 @@ import { CRAFT_AND_STRUCTURE_QUESTIONS } from './craft-and-structure.js';
 import { EXPRESSION_OF_IDEAS_QUESTIONS } from './expression-of-ideas.js';
 import { STANDARD_ENGLISH_QUESTIONS } from './standard-english.js';
 import { MCAT_CP_QUESTIONS } from './mcat-cp.js';
+import { MCAT_CP_PASSAGE_QUESTIONS } from './mcat-cp-passages.js';
+import { MCAT_CARS_QUESTIONS } from './mcat-cars.js';
+import { MCAT_BB_QUESTIONS } from './mcat-bb.js';
+import { MCAT_BB_PASSAGE_QUESTIONS } from './mcat-bb-passages.js';
+import { MCAT_PS_QUESTIONS } from './mcat-ps.js';
+import { MCAT_PS_PASSAGE_QUESTIONS } from './mcat-ps-passages.js';
 
 export const ORIGINAL_QUESTIONS = [
   ...ALGEBRA_QUESTIONS,
@@ -28,4 +34,10 @@ export const ORIGINAL_QUESTIONS = [
   ...EXPRESSION_OF_IDEAS_QUESTIONS,
   ...STANDARD_ENGLISH_QUESTIONS,
   ...MCAT_CP_QUESTIONS,
+  ...MCAT_CP_PASSAGE_QUESTIONS,
+  ...MCAT_CARS_QUESTIONS,
+  ...MCAT_BB_QUESTIONS,
+  ...MCAT_BB_PASSAGE_QUESTIONS,
+  ...MCAT_PS_QUESTIONS,
+  ...MCAT_PS_PASSAGE_QUESTIONS,
 ];

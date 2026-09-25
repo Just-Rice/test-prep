@@ -1,16 +1,18 @@
 # Test Prep
 
-An adaptive study app for the SAT, PSAT and ACT that runs entirely in the browser.
+An adaptive study app for the SAT, PSAT, ACT and MCAT that runs entirely in the browser.
 
 **Live site: https://just-rice.github.io/test-prep/**
 
-- **Four tests, each with its own progress:** the SAT, PSAT/NMSQT and PSAT 10, PSAT 8/9, and the ACT
+- **Five tests, each with its own progress:** the SAT, PSAT/NMSQT and PSAT 10, PSAT 8/9, the ACT and the MCAT
 - **Placement test** that adapts question difficulty as you answer, or a grade-level starting point
 - **Adaptive practice** that targets your weakest skills at about a 70% success rate, with explanations
 - **Timed practice tests** in each test's format: two adaptive modules per section for the SAT Suite, and one
-  timed block per section for the ACT (Science optional, outside the Composite)
+  timed block per section for the ACT (Science optional, outside the Composite) and the MCAT
 - **Test-day tools:** timer, flag for review, answer eliminator, passage highlighter, question navigator,
   Desmos calculator and formula reference
+- **MCAT lessons and flashcards:** a short lesson for each of the AAMC's content categories in all four sections,
+  with a worked example and links to the free OpenStax textbooks and Khan Academy, plus key-term flashcards
 - **Mistake log and spaced review:** tag why you missed a question; it comes back after 1, 3, 7, 14 and 30 days
 - **Dashboard** with today's plan, a sortable skills table, your streak and review queue, and a **Scores** page
   with your estimate on the real scale and a trend of your practice tests
@@ -40,6 +42,11 @@ redistributed. For a real question library:
   reporting category come from, so a booklet without it cannot be read. The English, math and reading tests are
   read; the science test is skipped for now, because its questions depend on figures and tables that the reader
   cannot yet cut out reliably.
+
+- **MCAT:** the AAMC publishes no question bank, and its practice material may not be copied, so the MCAT questions
+  are written for this app and ship with it: 272 across the four sections, stand-alone and in passage sets, in
+  `js/questions/mcat-*.js`. The tests re-solve every calculated answer and check that answer letters, difficulty and
+  choice length give nothing away.
 
 `npm start` (or `npm run build`) parses the PDFs into `data/questions.json` plus cropped images for parts that
 contain math, graphs or tables. `exports/` and `data/` are gitignored, so no official content is ever committed.

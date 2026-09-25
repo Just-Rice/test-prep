@@ -11,6 +11,9 @@ import { answeredBefore, checkOwnKey, explainConfigured, explainKey, explainQues
 import { DEMO_QUESTIONS } from './demo-questions.js';
 import { ORIGINAL_QUESTIONS } from './questions/index.js';
 import { MCAT_CP_LESSONS } from './lessons/mcat-cp.js';
+import { MCAT_CARS_LESSONS } from './lessons/mcat-cars.js';
+import { MCAT_BB_LESSONS } from './lessons/mcat-bb.js';
+import { MCAT_PS_LESSONS } from './lessons/mcat-ps.js';
 import { mountCalculator } from './calc.js';
 import { currentStreak, dayKey, longestStreak } from './streak.js';
 import {
@@ -2471,8 +2474,15 @@ function bindOfficialScores() {
 
 // ---------- lessons ----------
 
-// Short lessons, one per content category, for the tests that have them (so far the MCAT's Chem/Phys section).
-const LESSONS = { mcat: MCAT_CP_LESSONS.map(lesson => ({ ...lesson, section: 'CP' })) };
+// Short lessons, one per content category, for the tests that have them (so far only the MCAT).
+const LESSONS = {
+  mcat: [
+    ...MCAT_CP_LESSONS.map(lesson => ({ ...lesson, section: 'CP' })),
+    ...MCAT_CARS_LESSONS.map(lesson => ({ ...lesson, section: 'CARS' })),
+    ...MCAT_BB_LESSONS.map(lesson => ({ ...lesson, section: 'BB' })),
+    ...MCAT_PS_LESSONS.map(lesson => ({ ...lesson, section: 'PS' })),
+  ],
+};
 const lessonsHere = () => LESSONS[examId] ?? [];
 
 function viewLearn(id) {
