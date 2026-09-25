@@ -72,6 +72,8 @@ html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
 a { color: inherit; text-underline-offset: 2px; }
 p a, .hint a, .note a, .eyebrow a { color: var(--ink); font-weight: 600; }
+/* A primary button made from a link keeps its own ink inside a note, or it is ink on ink. */
+.note a.button.primary, .hint a.button.primary, p a.button.primary { color: var(--bg); }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0 0 0.6rem; }
 h1 { font-size: clamp(26px, 3.2vw, 30px); font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; }
