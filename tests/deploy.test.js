@@ -35,3 +35,11 @@ test('the import map versions every module the app loads', () => {
 test('the Pages deploy stamps the version into index.html', () => {
   assert.match(read('.github/workflows/pages.yml'), /s\/__VERSION__\//);
 });
+
+// A failing test stops the deploy before anything is uploaded, so the live site stays on the last good version.
+test('the Pages deploy runs the tests before it uploads anything', () => {
+  const workflow = read('.github/workflows/pages.yml');
+  const tests = workflow.indexOf('node --test');
+  assert.ok(tests > 0, 'the tests run');
+  assert.ok(tests < workflow.indexOf('upload-pages-artifact'), 'before the site is uploaded');
+});

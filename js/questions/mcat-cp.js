@@ -106,7 +106,7 @@ export const MCAT_CP_QUESTIONS = [
     'The thin lens equation gives 1/dᵢ = 1/f − 1/dₒ = 1/20 − 1/60 = 2/60, so dᵢ = 30 cm: a real image on the far side of the lens.'),
   mc('4d-6', '4D', 'Hard', 'A patient’s corrective lens has a power of −2.5 diopters. Which describes the lens?',
     ['A converging lens with a focal length of 0.4 m, for farsightedness', 'A converging lens with a focal length of 2.5 m, for nearsightedness', 'A diverging lens with a focal length of 0.4 m, for nearsightedness', 'A diverging lens with a focal length of 2.5 m, for farsightedness'], 'C',
-    'Power is 1/f with f in metres, so f = 1 ÷ (−2.5) = −0.4 m. A negative focal length means a diverging lens, which is how nearsightedness is corrected.'),
+    'Power is 1/f with f in meters, so f = 1 ÷ (−2.5) = −0.4 m. A negative focal length means a diverging lens, which is how nearsightedness is corrected.'),
 
   // ---- 4E: atoms, nuclear decay and electronic structure ----
   mc('4e-1', '4E', 'Easy', 'Uranium-238 (Z = 92) undergoes alpha decay. What nucleus is produced?',
@@ -155,9 +155,9 @@ export const MCAT_CP_QUESTIONS = [
   mc('5b-2', '5B', 'Easy', 'Which of these compounds can form hydrogen bonds with other molecules of the same compound?',
     ['CH₄', 'CH₃OCH₃', 'CH₃CH₂OH', 'CH₃Cl'], 'C',
     'Hydrogen bonding needs H bonded directly to N, O or F. Only ethanol has an O–H. Dimethyl ether has oxygen but no H on it.'),
-  mc('5b-3', '5B', 'Medium', 'A molecule has two chiral centres. What is the largest number of stereoisomers it can have?',
+  mc('5b-3', '5B', 'Medium', 'A molecule has two chiral centers. What is the largest number of stereoisomers it can have?',
     ['4', '6', '8', '16'], 'A',
-    'The maximum is 2ⁿ for n chiral centres, and 2² = 4. If the molecule has an internal plane of symmetry, a meso form reduces this to 3.'),
+    'The maximum is 2ⁿ for n chiral centers, and 2² = 4. If the molecule has an internal plane of symmetry, a meso form reduces this to 3.'),
   mc('5b-4', '5B', 'Medium', 'What is the hybridization of the carbon atom in formaldehyde, H₂C=O?',
     ['sp', 'sp²', 'sp³', 'sp³d'], 'B',
     'The carbon has three electron groups (two C–H bonds and the double bond), which makes it sp² and trigonal planar.'),
@@ -194,7 +194,7 @@ export const MCAT_CP_QUESTIONS = [
     'Three amino acids in a chain are joined by two peptide bonds, and each bond forms by condensation, releasing one water.'),
   mc('5d-2', '5D', 'Easy', 'Which amino acid is not chiral?',
     ['Alanine', 'Serine', 'Leucine', 'Glycine'], 'D',
-    'Glycine’s side chain is a hydrogen atom, so its alpha carbon carries two identical groups and is not a chiral centre.'),
+    'Glycine’s side chain is a hydrogen atom, so its alpha carbon carries two identical groups and is not a chiral center.'),
   mc('5d-3', '5D', 'Medium', 'Which compound reacts most readily with a nucleophile by nucleophilic acyl substitution?',
     ['Acetamide', 'Methyl acetate', 'Acetyl chloride', 'Acetic anhydride'], 'C',
     'Reactivity follows how good the leaving group is: acid chlorides are most reactive, then anhydrides, esters and amides. Chloride is the best leaving group.'),
@@ -206,7 +206,7 @@ export const MCAT_CP_QUESTIONS = [
     'SN2 goes by backside attack, which inverts the stereocentre. The hydroxyl takes the bromine’s place at the highest priority, so R becomes S.'),
   mc('5d-6', '5D', 'Hard', 'At which carbon do α-D-glucopyranose and β-D-glucopyranose differ?',
     ['C-2', 'C-5, which sets whether the sugar is D or L', 'C-6', 'C-1, the anomeric carbon'], 'D',
-    'Closing the ring makes C-1 a new chiral centre, the anomeric carbon. The α and β anomers differ only in the orientation of its hydroxyl group.'),
+    'Closing the ring makes C-1 a new chiral center, the anomeric carbon. The α and β anomers differ only in the orientation of its hydroxyl group.'),
 
   // ---- 5E: thermodynamics and kinetics ----
   mc('5e-1', '5E', 'Easy', 'A reaction has a negative ΔH and a positive ΔS. When is it spontaneous?',

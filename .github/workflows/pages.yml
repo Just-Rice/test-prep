@@ -24,6 +24,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The tests run before anything is published. If one fails, this job stops here: the live site stays on the
+      # last version that passed, and GitHub emails whoever pushed. They need no installing, and the two that read
+      # real PDFs switch themselves off here, since exports/ is never committed.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run the tests
+        run: node --test tests/*.test.js
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:

@@ -243,7 +243,7 @@ export async function signInWithUsername(username, passcode, { create = false } 
   if (!/^[a-z0-9][a-z0-9._-]{2,29}$/.test(name)) {
     throw new Error('Usernames are 3–30 characters: letters, numbers, dots, dashes or underscores.');
   }
-  if (create && passcode.length < 6) throw new Error('Choose a passcode of at least 6 characters.');
+  if (create && passcode.length < 6) throw new Error('Choose a password of at least 6 characters.');
   const email = `${name}@${USERNAME_DOMAIN}`;
   const action = create ? fb.auth.createUserWithEmailAndPassword : fb.auth.signInWithEmailAndPassword;
   await authAction(() => action(fb.authInstance, email, passcode));
@@ -312,7 +312,7 @@ export async function changeTestAccountPasscode(id, oldPasscode, newPasscode) {
     } else {
       await auth.createUserWithEmailAndPassword(instance, email, newPasscode).catch(err => {
         throw new Error(err?.code === 'auth/email-already-in-use'
-          ? 'The test account’s passcode doesn’t match the saved link, so the link couldn’t be changed.' : describeError(err));
+          ? 'The test account’s password doesn’t match the saved link, so the link couldn’t be changed.' : describeError(err));
       });
     }
     await auth.signOut(instance);
@@ -344,18 +344,18 @@ async function authAction(action) {
   }
 }
 
-const NO_MATCH = "That username and passcode don't match an account.";
+const NO_MATCH = "That username and password don't match an account.";
 const MESSAGES = {
   'auth/invalid-credential': NO_MATCH,
   'auth/wrong-password': NO_MATCH,
   'auth/user-not-found': NO_MATCH,
   'auth/invalid-email': "That username can't be used.",
   'auth/email-already-in-use': 'That username is taken. Pick another, or sign in if it is yours.',
-  'auth/weak-password': 'Choose a passcode of at least 6 characters.',
+  'auth/weak-password': 'Choose a password of at least 6 characters.',
   'auth/too-many-requests': 'Too many attempts. Wait a few minutes and try again.',
   'auth/popup-blocked': 'The sign-in window was blocked. Allow pop-ups for this site and try again.',
   'auth/popup-closed-by-user': '',
-  'auth/cancelled-popup-request': '',
+  'auth/canceled-popup-request': '',
   'auth/network-request-failed': 'Could not reach the sign-in service. Check your internet connection.',
   'auth/unauthorized-domain': "This site's address isn't on the Firebase project's list of authorized domains.",
   'auth/operation-not-allowed': "That sign-in method isn't turned on in the Firebase project.",
@@ -365,7 +365,7 @@ const MESSAGES = {
   unavailable: "Offline. Progress is saved on this device and will sync when you're back online.",
 };
 
-// An empty string means the student cancelled, so there is nothing to show.
+// An empty string means the student canceled, so there is nothing to show.
 function describeError(err) {
   return MESSAGES[err?.code] ?? `Sync problem: ${err?.message || err}`;
 }

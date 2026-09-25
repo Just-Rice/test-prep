@@ -313,7 +313,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .prompt-image, .answer-image, .rationale, details.original { overflow-x: auto; }
 .choice-btn .qimg { max-width: 100%; }
 /* Exported question images are black on white; in dark mode, invert them so they don't glare. */
-@media (prefers-color-scheme: dark) { .figure, .qimg { filter: invert(0.9) hue-rotate(180deg); } }
+@media (prefers-color-scheme: dark) { .figure, .qimg, .zoom-img { filter: invert(0.9) hue-rotate(180deg); } }
 .figure { margin: 12px auto 0; }
 .stem { font-weight: 600; font-size: 16.5px; margin-bottom: 14px; }
 .prompt-image { margin-bottom: 14px; }
@@ -612,8 +612,7 @@ button.link:hover:not(:disabled) { text-decoration: underline; }
 .mastery-chip.high { background: var(--good-soft); }
 .mastery-chip.high i { background: var(--good); }
 @container (max-width: 480px) {
-  .skill-list li { grid-template-columns: minmax(0, 1fr) auto; }
-  .skill-list li button { grid-column: 1 / -1; justify-self: start; }
+  .skill-list li { gap: 8px; }
 }
 
 /* ---------- loading skeleton ---------- */
@@ -700,8 +699,8 @@ button.link:hover:not(:disabled) { text-decoration: underline; }
   color-scheme: light;
 }
 /* Export crops are black on white, so they are inverted on a dark background and left alone on a light one. */
-:root[data-theme="dark"] .figure, :root[data-theme="dark"] .qimg { filter: invert(0.9) hue-rotate(180deg); }
-:root[data-theme="light"] .figure, :root[data-theme="light"] .qimg { filter: none; }
+:root[data-theme="dark"] .figure, :root[data-theme="dark"] .qimg, :root[data-theme="dark"] .zoom-img { filter: invert(0.9) hue-rotate(180deg); }
+:root[data-theme="light"] .figure, :root[data-theme="light"] .qimg, :root[data-theme="light"] .zoom-img { filter: none; }
 
 /* Text on the accent: the yellow needs dark ink, the blues and purples need white. */
 .badge, .streak.on .streak-count, .today-mobile .streak.on .streak-count { color: var(--on-accent, #241A00); }
@@ -934,3 +933,57 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
   .choice-btn:has(.tag) > span:not(.letter):not(.tag) { flex: 1 1 0; min-width: 0; }
   .choice-btn .tag { flex-basis: 100%; margin-left: 42px; padding-left: 0; }
 }
+
+/* ---------- pictures: Zoom, and ones wider than the screen ---------- */
+.zoom-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; padding: 4px 10px 4px 8px; border-radius: 999px; font-size: calc(13px * var(--text-scale)); font-weight: 700; }
+.zoom-btn .icon { width: 16px; height: 16px; }
+.zoom-btn.icon-only { flex: none; align-self: center; margin: 0; padding: 0; width: 34px; height: 34px; justify-content: center; }
+.zoom-view { width: min(100vw - 24px, 1400px); max-width: none; height: min(100dvh - 24px, 1000px); max-height: none; padding: 0; border: 0; border-radius: 16px; background: var(--surface); color: var(--ink); box-shadow: var(--pop); }
+.zoom-view[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.zoom-view::backdrop { background: rgb(0 0 0 / 0.6); }
+.zoom-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--rule); }
+.zoom-bar [data-zoom="in"], .zoom-bar [data-zoom="out"] { width: 40px; font-size: 20px; line-height: 1; padding-inline: 0; }
+.zoom-bar [data-zoom="close"] { margin-left: auto; }
+.zoom-level { min-width: 3.5em; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+.zoom-stage { overflow: auto; padding: 16px; background: var(--surface-2); }
+.zoom-img { display: block; max-width: none; height: auto; margin: 0 auto; background: #fff; border-radius: 6px; }
+/* A picture running off the edge fades there until it has been scrolled to the end, with a line to say so. */
+.wide:not(.at-end) { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
+.swipe-hint { margin: 4px 0 0; font-size: calc(13px * var(--text-scale)); font-weight: 600; color: var(--accent-ink); }
+.tip { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--ink); font-size: calc(14px * var(--text-scale)); }
+
+/* ---------- phones: the top bar, the More sheet, and timed tests ---------- */
+@media (max-width: 820px) {
+  .top-sync { width: auto; height: auto; padding: 7px 11px; border-radius: 999px; font-size: 14px; font-weight: 700; color: var(--side-ink); text-decoration: none; white-space: nowrap; }
+  .top-sync.signin { background: var(--accent); color: var(--on-accent); }
+  .top-sync.bad { color: var(--low); }
+  .sheet-tests { display: grid; gap: 6px; padding: 8px 6px 10px; border-bottom: 1px solid var(--rule); margin-bottom: 4px; }
+  .sheet-tests .eyebrow { margin: 0; }
+  .sheet-tests .exam-switch { width: 100%; }
+  .sheet-tests .exam-switch button { flex: 1; padding-inline: 4px; }
+  body.in-test .tabs { display: none; }
+  body.in-test #view { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+}
+.exit-test { display: none; }
+@media (max-width: 820px) { .exit-test { display: inline-flex; } }
+
+/* ---------- the sidebar's running-test line ---------- */
+.side-nav .label.has-sub { display: grid; line-height: 1.2; }
+.nav-sub { font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.shell:not(.collapsed) .side-nav .badge.live { display: none; }
+
+/* ---------- first visit ---------- */
+.welcome h2 { margin-bottom: 4px; }
+.welcome p { margin: 0; }
+.welcome-steps { margin: 10px 0 12px; padding-left: 22px; display: grid; gap: 6px; max-width: 72ch; }
+
+/* ---------- shorter lists, with the rest on request ---------- */
+.table-more { padding: 10px 4px 2px; }
+.skill-list:not(.expanded) li.extra { display: none; }
+.show-all { margin-top: 10px; }
+.practice-link { font-size: 14px; font-weight: 700; white-space: nowrap; color: var(--ink); }
+
+/* ---------- Review's tabs ---------- */
+.review-tabs { flex-wrap: wrap; }
+.review-tabs .count { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.review-tabs a.active .count { background: var(--accent-soft); color: var(--accent-ink); }

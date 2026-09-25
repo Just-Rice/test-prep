@@ -22,7 +22,7 @@ export const MCAT_CP_LESSONS = [
       'Work is force times distance moved in the direction of the force, W = Fd cos θ. Kinetic energy is ½mv² and gravitational potential energy is mgh. The net work done on an object equals its change in kinetic energy, and without friction, mechanical energy is conserved. Power is work per second: P = W/t, in watts.',
     ],
     terms: [
-      ['Displacement', 'Change in position, with a direction. Distance travelled has no direction.'],
+      ['Displacement', 'Change in position, with a direction. Distance traveled has no direction.'],
       ['Net force', 'The sum of all forces on an object; it sets the acceleration (F = ma).'],
       ['Normal force', 'The push of a surface on an object, at right angles to the surface.'],
       ['Torque', 'The turning effect of a force: τ = rF sin θ.'],
@@ -103,7 +103,7 @@ export const MCAT_CP_LESSONS = [
     body: [
       'Every wave obeys v = fλ: speed equals frequency times wavelength. Sound is a longitudinal pressure wave that travels faster through solids and liquids than through air (about 343 m/s). Loudness is measured in decibels, β = 10 log(I/I₀), so every 10 dB step means ten times the intensity. A source moving towards you sounds higher-pitched (the Doppler effect).',
       'Light is an electromagnetic wave. A photon’s energy is E = hf, so higher frequency (shorter wavelength) means more energy: ultraviolet carries more than visible light. Light slows in a material by its index of refraction, n = c/v, and bends at a boundary according to Snell’s law, n₁ sin θ₁ = n₂ sin θ₂.',
-      'Lenses and mirrors follow 1/f = 1/dₒ + 1/dᵢ, with magnification m = −dᵢ/dₒ. A converging lens has a positive focal length and forms a real, upside-down image of an object beyond its focal point. A lens’s power in diopters is 1/f with f in metres; nearsightedness is corrected with a diverging lens.',
+      'Lenses and mirrors follow 1/f = 1/dₒ + 1/dᵢ, with magnification m = −dᵢ/dₒ. A converging lens has a positive focal length and forms a real, upside-down image of an object beyond its focal point. A lens’s power in diopters is 1/f with f in meters; nearsightedness is corrected with a diverging lens.',
     ],
     terms: [
       ['Wave speed', 'v = fλ.'],
@@ -180,19 +180,19 @@ export const MCAT_CP_LESSONS = [
     body: [
       'Atoms in a molecule arrange their bonds and lone pairs as far apart as possible (VSEPR): two groups make a line (180°), three a flat triangle (120°), four a tetrahedron (109.5°). Lone pairs squeeze the bond angles a little, which is why water is bent at about 104.5°. A single bond is one sigma bond; a double bond adds a pi bond, which stops rotation.',
       'Molecules attract each other through intermolecular forces. From weakest to strongest: London dispersion forces (in everything, and larger for bigger molecules), dipole–dipole forces between polar molecules, and hydrogen bonds, where H bonded to N, O or F is drawn to a lone pair on another N, O or F. Stronger forces mean higher boiling points.',
-      'Isomers share a formula but differ in structure. Stereoisomers differ only in 3D arrangement: enantiomers are non-superimposable mirror images, which share physical properties except the direction they rotate plane-polarized light; diastereomers are stereoisomers that are not mirror images. A molecule with n chiral centres has at most 2ⁿ stereoisomers.',
+      'Isomers share a formula but differ in structure. Stereoisomers differ only in 3D arrangement: enantiomers are non-superimposable mirror images, which share physical properties except the direction they rotate plane-polarized light; diastereomers are stereoisomers that are not mirror images. A molecule with n chiral centers has at most 2ⁿ stereoisomers.',
     ],
     terms: [
       ['VSEPR', 'Electron groups around an atom spread out as far as possible.'],
       ['Hybridization', 'sp (linear), sp² (trigonal planar), sp³ (tetrahedral).'],
       ['Hydrogen bond', 'Attraction between H on N, O or F and a lone pair on N, O or F.'],
-      ['Chiral centre', 'Usually a carbon bonded to four different groups.'],
+      ['Chiral center', 'Usually a carbon bonded to four different groups.'],
       ['Enantiomers', 'Non-superimposable mirror-image stereoisomers.'],
       ['Diastereomers', 'Stereoisomers that are not mirror images of each other.'],
     ],
     example: {
-      problem: 'A molecule has 3 chiral centres and no internal plane of symmetry. How many stereoisomers can it have?',
-      steps: ['The maximum is 2ⁿ for n chiral centres.', '2³ = 8, and with no symmetry none of them are identical (no meso forms).'],
+      problem: 'A molecule has 3 chiral centers and no internal plane of symmetry. How many stereoisomers can it have?',
+      steps: ['The maximum is 2ⁿ for n chiral centers.', '2³ = 8, and with no symmetry none of them are identical (no meso forms).'],
       answer: '8 stereoisomers',
     },
     links: [chemistry(7, 'chemical bonding and molecular geometry'), chemistry(10, 'liquids and solids'), organic(5, 'stereochemistry'), KHAN],
@@ -203,7 +203,7 @@ export const MCAT_CP_LESSONS = [
     body: [
       'Extraction splits compounds between two liquids that do not mix, usually water and an organic solvent. Charge moves a compound into water: adding base deprotonates a carboxylic acid into its water-soluble salt, and adding acid does the same for an amine.',
       'Distillation separates liquids by boiling point. Simple distillation works when the boiling points differ by more than about 25 °C; closer than that needs fractional distillation. Recrystallization purifies a solid by dissolving it hot and letting pure crystals form as it cools.',
-      'Chromatography separates by how strongly compounds stick to a stationary phase. On a silica TLC plate, which is polar, less polar compounds travel farther and have a higher Rf (distance travelled by the compound ÷ distance travelled by the solvent). In size-exclusion chromatography the largest molecules come out first, because they cannot enter the pores. Gel electrophoresis with SDS separates proteins by size alone; isoelectric focusing separates them by their isoelectric point (pI).',
+      'Chromatography separates by how strongly compounds stick to a stationary phase. On a silica TLC plate, which is polar, less polar compounds travel farther and have a higher Rf (distance traveled by the compound ÷ distance traveled by the solvent). In size-exclusion chromatography the largest molecules come out first, because they cannot enter the pores. Gel electrophoresis with SDS separates proteins by size alone; isoelectric focusing separates them by their isoelectric point (pI).',
     ],
     terms: [
       ['Extraction', 'Separating compounds between two immiscible liquids.'],

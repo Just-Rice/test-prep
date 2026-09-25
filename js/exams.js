@@ -32,21 +32,21 @@ export const EXAMS = {
     id: 'sat', name: 'SAT', long: 'SAT',
     scale: { min: 200, max: 800, center: 500, spread: 110, step: 10 },
     total: { kind: 'sum', min: 400, max: 1600 },
-    grades: [8, 9, 10, 11, 12], gradePrior: GRADE_PRIOR,
+    grades: [8, 9, 10, 11, 12], usualGrade: 11, gradePrior: GRADE_PRIOR,
   },
   psat: {
     ...COLLEGE_BOARD,
     id: 'psat', name: 'PSAT', long: 'PSAT/NMSQT and PSAT 10',
     scale: { min: 160, max: 760, center: 460, spread: 110, step: 10 },
     total: { kind: 'sum', min: 320, max: 1520 },
-    grades: [8, 9, 10, 11], gradePrior: shift(GRADE_PRIOR, 0.25),
+    grades: [8, 9, 10, 11], usualGrade: 10, gradePrior: shift(GRADE_PRIOR, 0.25),
   },
   psat89: {
     ...COLLEGE_BOARD,
     id: 'psat89', name: 'PSAT 8/9', long: 'PSAT 8/9',
     scale: { min: 120, max: 720, center: 420, spread: 110, step: 10 },
     total: { kind: 'sum', min: 240, max: 1440 },
-    grades: [8, 9], gradePrior: shift(GRADE_PRIOR, 0.6),
+    grades: [8, 9], usualGrade: 9, gradePrior: shift(GRADE_PRIOR, 0.6),
   },
   act: {
     id: 'act', name: 'ACT', long: 'ACT', maker: 'ACT', source: 'act',
@@ -68,7 +68,7 @@ export const EXAMS = {
     },
     scale: { min: 1, max: 36, center: 18, spread: 6, step: 1 },
     total: { kind: 'average', sections: ['ENG', 'MATH', 'READ'], min: 1, max: 36, label: 'Composite' },
-    grades: [9, 10, 11, 12], gradePrior: { 8: -0.9, 9: -0.6, 10: -0.3, 11: 0, 12: 0.2 },
+    grades: [9, 10, 11, 12], usualGrade: 11, gradePrior: { 8: -0.9, 9: -0.6, 10: -0.3, 11: 0, 12: 0.2 },
   },
   mcat: {
     id: 'mcat', name: 'MCAT', long: 'MCAT', maker: 'AAMC', source: 'original',
@@ -98,7 +98,7 @@ export const EXAMS = {
     total: { kind: 'sum', min: 472, max: 528 },
     // Difficulty is shown as three tiers rather than easy, medium and hard.
     levelNames: { Easy: 'Foundation', Medium: 'Intermediate', Hard: 'Exam-level' },
-    grades: [13, 14, 15, 16, 17],
+    grades: [13, 14, 15, 16, 17], usualGrade: 15,
     gradeNames: { 13: 'First year of college', 14: 'Second year of college', 15: 'Third year of college', 16: 'Fourth year of college', 17: 'Graduated' },
     gradePrior: { 13: -0.6, 14: -0.4, 15: -0.15, 16: 0, 17: 0.1 },
   },

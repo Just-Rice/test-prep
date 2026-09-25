@@ -49,8 +49,8 @@ export const PROBLEM_SOLVING_QUESTIONS = [
   mc('psda-07', RAT, 'Medium', 'Working at the same steady rate, 5 workers build a wall in 12 days. How many days would 4 workers take to build the same wall?',
     ['9.6', '10', '15', '20'], 'C',
     'The job takes 5 × 12 = 60 worker-days. With 4 workers that is 60 ÷ 4 = 15 days. Fewer workers means more days, so choices A and B must be wrong.'),
-  spr('psda-08', RAT, 'Hard', 'A drink is mixed with 3 parts water to 2 parts syrup. How many litres of syrup are in 45 litres of the drink?', ['18'],
-    'The mixture has 3 + 2 = 5 parts in total, so syrup is 2/5 of it: 45 × 2/5 = 18 litres.'),
+  spr('psda-08', RAT, 'Hard', 'A drink is mixed with 3 parts water to 2 parts syrup. How many liters of syrup are in 45 liters of the drink?', ['18'],
+    'The mixture has 3 + 2 = 5 parts in total, so syrup is 2/5 of it: 45 × 2/5 = 18 liters.'),
 
   // ---- Percentages ----
   mc('psda-09', PCT, 'Easy', 'What is 20% of 150?',
@@ -111,7 +111,7 @@ export const PROBLEM_SOLVING_QUESTIONS = [
   mc('psda-28', TWO, 'Hard', 'A model predicts y = 4x + 9. For a data point with x = 5, the actual value of y is 32. What is the residual for that point?',
     ['−3', '3', '29', '32'], 'B',
     'The model predicts 4(5) + 9 = 29. The residual is the actual value minus the predicted value: 32 − 29 = 3. A positive residual means the point lies above the line.'),
-  mc('psda-29', TWO, 'Medium', 'The total cost of a repair is modelled by y = 0.5x + 12, where x is the number of minutes worked. What does the model predict the cost to be before any work is done?',
+  mc('psda-29', TWO, 'Medium', 'The total cost of a repair is modeled by y = 0.5x + 12, where x is the number of minutes worked. What does the model predict the cost to be before any work is done?',
     ['0.5', '6', '12', '12.5'], 'C',
     'Before any work, x = 0, so y = 0.5(0) + 12 = 12. The y-intercept is the starting value, here a fixed call-out charge.'),
   spr('psda-30', TWO, 'Hard', 'A line of best fit passes through the points (2, 11) and (6, 23). What is the slope of the line?', ['3'],
@@ -149,7 +149,7 @@ export const PROBLEM_SOLVING_QUESTIONS = [
     ['70', '700', '4,200', '1,200'], 'C',
     'Apply the sample percentage to the whole population: 0.35 × 12,000 = 4,200. Choice A is 35% of the sample rather than of the town.'),
   mc('psda-41', INF, 'Medium', 'A principal wants to estimate how many hours students at the school study each week. Which sample best supports a conclusion about all students at the school?',
-    ['Students in one honours class', 'Students who volunteered to answer online', 'A random sample of all students at the school', 'Students leaving a football game'], 'C',
+    ['Students in one honors class', 'Students who volunteered to answer online', 'A random sample of all students at the school', 'Students leaving a football game'], 'C',
     'Only a random sample of the whole population avoids favouring one kind of student, so only it supports a conclusion about every student at the school.'),
   spr('psda-42', INF, 'Hard', 'A poll reports that 48% of people agree, with a margin of error of 4 percentage points. What is the upper end of the plausible range, as a percent?', ['52'],
     'Add the margin of error to the estimate: 48 + 4 = 52 percent.'),

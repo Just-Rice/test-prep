@@ -1,4 +1,4 @@
-// How the app looks and moves — theme, accent colour, text size, contrast and animation — extra time on timed
+// How the app looks and moves — theme, accent color, text size, contrast and animation — extra time on timed
 // tests, and two choices about what it offers: AI help, and whether the questions written for this app are mixed in
 // with the official ones. These stay on the device and are deliberately not part of cloud sync; a phone and a
 // laptop can reasonably want different settings.
@@ -57,13 +57,13 @@ export const CHOICES = {
   // choosePool. This setting was once called "originals"; the new name means a value saved under the old one,
   // which saving any other setting also wrote, doesn't count as a choice.
   questions: [
-    ['on', 'Included', 'Practise with them alongside the official questions, so there are far more to go round.'],
+    ['on', 'Included', 'Practice with them alongside the official questions, so there are far more to go round.'],
     ['off', 'Official only', 'Only College Board and ACT questions. Fewer of them, so they come round again sooner.'],
   ],
   // How hard practice questions are. Chosen on the Practice page itself, where it matters, and kept here
   // so it stays chosen. Timed tests and the placement test keep their own mix regardless.
   level: [
-    ['adaptive', 'Matched to me', 'Questions at the level you are likely to get about 70% of right, moving as you improve.'],
+    ['adaptive', 'Right for me', 'Questions at the level you are likely to get about 70% of right, moving as you improve.'],
     ['Easy', 'Easy', ''],
     ['Medium', 'Medium', ''],
     ['Hard', 'Hard', ''],
@@ -98,11 +98,11 @@ export function applySettings(settings) {
   matchBrowserBar();
 }
 
-// On a phone the browser's own bar sits directly above the app's top bar, so it takes the same colour and
+// On a phone the browser's own bar sits directly above the app's top bar, so it takes the same color and
 // follows the theme with it, including when the device itself switches between light and dark.
 function matchBrowserBar() {
-  const colour = getComputedStyle(document.documentElement).getPropertyValue('--side').trim();
-  if (colour) for (const meta of document.querySelectorAll('meta[name="theme-color"]')) meta.content = colour;
+  const color = getComputedStyle(document.documentElement).getPropertyValue('--side').trim();
+  if (color) for (const meta of document.querySelectorAll('meta[name="theme-color"]')) meta.content = color;
 }
 globalThis.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', matchBrowserBar);
 

@@ -1,4 +1,4 @@
-// Turns what the readers find on a page into the questions the app practises with.
+// Turns what the readers find on a page into the questions the app practices with.
 //
 // The same questions are built in two places — by scripts/build-questions.js, from PDFs the owner keeps in
 // exports/, and in the browser by js/import-pdf.js, from a PDF a student picks themselves — and they have to

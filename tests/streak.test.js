@@ -6,24 +6,24 @@ import { currentStreak, dayKey, longestStreak } from '../js/streak.js';
 const at = (y, m, d, hour = 12) => new Date(y, m - 1, d, hour).getTime();
 const daysOf = (...times) => new Set(times.map(dayKey));
 
-test('practising every day builds a streak', () => {
+test('practicing every day builds a streak', () => {
   const days = daysOf(at(2026, 9, 18), at(2026, 9, 19), at(2026, 9, 20), at(2026, 9, 21));
   assert.equal(currentStreak(days, at(2026, 9, 21)), 4);
 });
 
 test('a streak survives until the end of today', () => {
-  // Practised the last three days but not yet today: the streak is still there to keep.
+  // Practiced the last three days but not yet today: the streak is still there to keep.
   const days = daysOf(at(2026, 9, 18), at(2026, 9, 19), at(2026, 9, 20));
   assert.equal(currentStreak(days, at(2026, 9, 21, 9)), 3);
 });
 
 test('a day with no practice ends the streak', () => {
-  // Practised Friday and Saturday, nothing on Sunday, and it is now Monday.
+  // Practiced Friday and Saturday, nothing on Sunday, and it is now Monday.
   const days = daysOf(at(2026, 9, 18), at(2026, 9, 19));
   assert.equal(currentStreak(days, at(2026, 9, 21)), 0);
 });
 
-test('after a missed day, practising again starts a new streak at one', () => {
+test('after a missed day, practicing again starts a new streak at one', () => {
   const days = daysOf(at(2026, 9, 18), at(2026, 9, 19), at(2026, 9, 21));
   assert.equal(currentStreak(days, at(2026, 9, 21)), 1);
 });

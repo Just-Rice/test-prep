@@ -242,7 +242,7 @@ const CHECKS = {
   'og-psda-43': () => null,
   'og-psda-44': () => null,
 
-  // ---- Evaluating statistical claims: these are judgements about study design, checked structurally ----
+  // ---- Evaluating statistical claims: these are judgments about study design, checked structurally ----
   'og-psda-45': () => null,
   'og-psda-46': () => null,
   'og-psda-47': () => null,

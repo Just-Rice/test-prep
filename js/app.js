@@ -133,6 +133,10 @@ const plural = (n, word) => `${typeof n === 'number' ? n.toLocaleString() : n} $
 const sectionName = id => sectionOf(exam, id)?.name ?? id;
 const sectionShort = id => sectionOf(exam, id)?.short ?? id;
 const range = s => `${s.low}–${s.high}`;
+// A date as people say it: "Sep 19", with the year only when it isn't this year.
+const shortDate = at => new Date(at).toLocaleDateString(undefined, {
+  month: 'short', day: 'numeric', ...(new Date(at).getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }),
+});
 // When a test was taken. An official score logged afterwards carries the date it was taken as well as when it was
 // logged, which is what sync and resets go by.
 const takenAt = t => t.takenAt ?? t.at;
@@ -179,18 +183,18 @@ function dedupe(questions) {
 const isOfficial = q => q.source === 'cb-export' || q.source === 'act-export';
 
 // Whether the questions written for this app are mixed in with the official ones. Until someone chooses,
-// their account decides: anyone invited to the shared library has the official questions and practises with
+// their account decides: anyone invited to the shared library has the official questions and practices with
 // those alone, and everyone else gets the written ones, which are all they have.
 const invitedToLibrary = () => cloudLibrary.access === 'admin' || cloudLibrary.access === 'tester';
 const includesWritten = () => (settings.questions === 'auto' ? !invitedToLibrary() : settings.questions === 'on');
 
-// The questions a test practises with, worked out for any test so the sidebar can say what each one has.
+// The questions a test practices with, worked out for any test so the sidebar can say what each one has.
 function poolFor(id) {
   const own = allQuestions.filter(q => examsOfQuestion(q).includes(id));
   const borrow = !own.length && EXAMS[id].source === 'cb';
   const candidates = borrow ? allQuestions.filter(q => examsOfQuestion(q).includes('sat')) : own;
   // "Official only" leaves out the questions written for this app. A test with no official questions
-  // yet keeps them anyway: switching it off there would leave nothing to practise at all, which helps
+  // yet keeps them anyway: switching it off there would leave nothing to practice at all, which helps
   // nobody, and the Library page says that is what happened.
   const official = candidates.filter(isOfficial);
   const wantsOfficial = !includesWritten();
@@ -226,11 +230,14 @@ function setExam(id) {
 
 const sectionCount = section => pool.filter(q => q.section === section).length;
 const allResponses = () => EXAM_IDS.flatMap(id => progressByExam[id].responses);
+// A question left blank on a timed test is recorded, as a miss, so the score counts it and it comes back in Review.
+// But nothing was answered, so it doesn't count toward the daily goal, the streak or the week's total.
+const gaveAnswer = r => r.choice != null;
 
 // The streak and today's count include study on any test.
 function answeredToday() {
   const today = dayKey(Date.now());
-  return allResponses().filter(r => dayKey(r.at) === today).length;
+  return allResponses().filter(r => gaveAnswer(r) && dayKey(r.at) === today).length;
 }
 
 const streakDays = () => currentStreak(studyDays());
@@ -317,11 +324,8 @@ function snippet(q) {
   const passage = q.passage?.replace(/\s+/g, ' ').trim();
   const stem = q.stem?.replace(/\s+/g, ' ').trim();
   const text = passage || (stem && !BOILERPLATE.test(stem) ? stem : null);
-  if (!text) {
-    // Nothing distinctive to show, so name what the question is about instead of repeating its boilerplate.
-    const kind = q.promptImage ? 'Diagram or equation' : 'Question';
-    return `${kind} · ${skillLabel(q.skill)}${q.difficulty ? ` · ${levelName(q.difficulty)}` : ''}`;
-  }
+  // Nothing distinctive to show: say what kind of question it is. The lists show its skill and difficulty underneath.
+  if (!text) return q.promptImage ? 'Question with a diagram' : 'Question';
   return text.length > 90 ? `${text.slice(0, 90)}…` : text;
 }
 
@@ -365,8 +369,135 @@ function showPictures(root) {
   for (const img of pictures) nearScreen ? nearScreen.observe(img) : loadPicture(img);
 }
 new MutationObserver(changes => {
-  for (const change of changes) for (const node of change.addedNodes) if (node.nodeType === 1) showPictures(node);
+  let added = false;
+  for (const change of changes) {
+    for (const node of change.addedNodes) {
+      if (node.nodeType !== 1) continue;
+      showPictures(node);
+      addZoomButtons(node);
+      added = true;
+    }
+  }
+  if (added) checkWidePictures();
 }).observe(document.body, { childList: true, subtree: true });
+
+// ---------- zooming in on pictures ----------
+//
+// Many questions, answers and explanations are pictures, printed at the size the official PDF used, and they don't
+// grow with the Text size setting. So every picture has a Zoom button beside it, which shows the picture on its own,
+// as large as the screen allows, with buttons to go larger or smaller (and pinching, on a phone). A picture inside an
+// answer choice can't hold a button of its own, since the choice is itself a button, so its Zoom sits beside it.
+
+const ZOOM_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4M11 8.5v5M8.5 11h5"/></svg>';
+const zoomTargets = new WeakMap();
+
+function addZoomButtons(root) {
+  const pictures = root.matches?.('img.qimg, img.figure') ? [root] : [...(root.querySelectorAll?.('img.qimg, img.figure') ?? [])];
+  for (const img of pictures) {
+    if (img.dataset.zoomable) continue;
+    img.dataset.zoomable = '1';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'zoom-btn';
+    const choice = img.closest('.choice-btn');
+    if (choice) {
+      const label = `Zoom in on choice ${choice.dataset.choice}`;
+      button.classList.add('icon-only');
+      button.setAttribute('aria-label', label);
+      button.title = label;
+      button.innerHTML = ZOOM_ICON;
+      choice.after(button);
+    } else {
+      button.setAttribute('aria-label', `Zoom in on the picture: ${img.alt}`);
+      button.innerHTML = `${ZOOM_ICON}<span>Zoom</span>`;
+      img.after(button);
+    }
+    zoomTargets.set(button, img);
+  }
+}
+
+function openZoom(img) {
+  // A picture from the shared library arrives when it is first scrolled to; one not in yet is fetched now.
+  if (!img.getAttribute('src')) {
+    img.addEventListener('load', () => openZoom(img), { once: true });
+    loadPicture(img);
+    return;
+  }
+  let dialog = document.getElementById('zoom');
+  if (!dialog) {
+    dialog = document.createElement('dialog');
+    dialog.id = 'zoom';
+    dialog.className = 'zoom-view';
+    dialog.setAttribute('aria-label', 'Zoomed-in picture');
+    document.body.appendChild(dialog);
+    dialog.addEventListener('click', e => { if (e.target === dialog) dialog.close(); });
+  }
+  const base = Number(img.getAttribute('width')) || img.naturalWidth || img.clientWidth || 300;
+  const fit = () => Math.max(0.5, (window.innerWidth - 48) / base);
+  // Starts as large as fits the screen, up to twice the size, and never smaller than the picture already was.
+  let scale = Math.max(1, Math.min(2, fit()));
+  dialog.innerHTML = `
+    <div class="zoom-bar">
+      <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+      <span class="zoom-level" aria-live="polite"></span>
+      <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+      <button type="button" data-zoom="fit">Fit to screen</button>
+      <button type="button" class="primary" data-zoom="close">Close</button>
+    </div>
+    <div class="zoom-stage"><img class="zoom-img" alt="${esc(img.alt)}" src="${esc(img.currentSrc || img.src)}"></div>`;
+  const picture = dialog.querySelector('.zoom-img');
+  const draw = () => {
+    picture.style.width = `${Math.round(base * scale)}px`;
+    dialog.querySelector('.zoom-level').textContent = `${Math.round(scale * 100)}%`;
+  };
+  const act = what => {
+    if (what === 'in') scale = Math.min(6, scale * 1.5);
+    else if (what === 'out') scale = Math.max(0.5, scale / 1.5);
+    else if (what === 'fit') scale = fit();
+    else return dialog.close();
+    draw();
+  };
+  dialog.onclick = e => { const b = e.target.closest('[data-zoom]'); if (b) act(b.dataset.zoom); };
+  dialog.onkeydown = e => {
+    if (e.key === '+' || e.key === '=') act('in');
+    else if (e.key === '-') act('out');
+    else if (e.key === '0') act('fit');
+  };
+  draw();
+  dialog.showModal();
+  dialog.querySelector('[data-zoom="close"]').focus();
+}
+document.addEventListener('click', e => {
+  const button = e.target.closest('.zoom-btn');
+  if (button && zoomTargets.has(button)) openZoom(zoomTargets.get(button));
+});
+
+// ---------- pictures wider than the screen ----------
+//
+// A picture is never shrunk below 80% of its size, so small print stays readable, which means a wide one can run past
+// the edge of a phone and has to be swiped sideways. The part out of sight fades at the edge, and a line underneath
+// says to swipe, until the student has reached the end.
+
+const SCROLLERS = '.prompt-image, .answer-image, .rationale, details.original';
+let wideFrame = 0;
+
+function markWide(box) {
+  const wide = box.scrollWidth > box.clientWidth + 4;
+  box.classList.toggle('wide', wide);
+  box.classList.toggle('at-end', wide && box.scrollLeft + box.clientWidth >= box.scrollWidth - 4);
+  const hint = box.nextElementSibling?.classList.contains('swipe-hint') ? box.nextElementSibling : null;
+  if (wide && !hint) box.insertAdjacentHTML('afterend', '<p class="swipe-hint" aria-hidden="true">This picture is wider than your screen: swipe or scroll sideways to see the rest →</p>');
+  else if (!wide && hint) hint.remove();
+}
+
+function checkWidePictures() {
+  cancelAnimationFrame(wideFrame);
+  wideFrame = requestAnimationFrame(() => { for (const box of view.querySelectorAll(SCROLLERS)) markWide(box); });
+}
+window.addEventListener('resize', checkWidePictures);
+document.addEventListener('toggle', checkWidePictures, true);   // a <details> opening shows the pictures inside it
+document.addEventListener('load', e => { if (e.target.tagName === 'IMG') checkWidePictures(); }, true);
+document.addEventListener('scroll', e => { if (e.target.matches?.(SCROLLERS)) markWide(e.target); }, true);
 
 // A typed-in answer drawn as math in the export can't be checked automatically; the student compares
 // their answer with the image and marks it. Placement and timed tests only use gradable questions.
@@ -475,7 +606,7 @@ document.addEventListener('click', e => {
 const ROUTES = {
   home: [viewHome, 'Dashboard'], scores: [viewScores, 'Scores'], start: [viewStart, 'Get started'],
   placement: [viewPlacement, 'Placement test'], placed: [viewPlaced, 'Placement results'], practice: [viewPractice, 'Practice'],
-  test: [viewTest, 'Practice test'], review: [viewReview, 'Review'], mistakes: [viewMistakes, 'Mistakes'],
+  test: [viewTest, 'Practice test'], review: [viewReview, 'Review'], mistakes: [viewMistakes, 'Review'],
   plan: [viewPlan, 'Study plan'], library: [viewLibrary, 'Library'], resources: [viewResources, 'Resources'],
   settings: [viewSettings, 'Settings'], account: [viewAccount, 'Account'], import: [viewImport, 'Your own questions'],
   learn: [viewLearn, 'Lessons'],
@@ -490,6 +621,7 @@ const JOIN_ROUTES = ['invite', 'personal'];
 // somebody is already reading looks like the screen glitching.
 function render({ quiet = false } = {}) {
   clearInterval(ticker);
+  setInTest(false);   // a test's own screen turns it back on
   view.removeAttribute('data-loading'); // the app started, so index.html's load-error fallback stands down
   view.toggleAttribute('data-quiet', quiet);
   const [name, arg] = location.hash.replace(/^#\/?/, '').split('/');
@@ -556,12 +688,17 @@ function streakWidget(streak, today, goal, withTooltip = false) {
     </div>`;
 }
 
+// The row of tests a phone shows under a page's title and at the top of its More sheet. (A wide screen has the
+// chooser at the top of the sidebar instead.)
+const examSwitchHtml = () => `<div class="exam-switch" role="group" aria-label="Test">${EXAM_IDS.map(id => `<button type="button" data-exam="${id}" aria-pressed="${id === examId}"${id === examId ? ' class="on"' : ''} title="${esc(EXAMS[id].long)}">${EXAMS[id].name}</button>`).join('')}</div>`;
+
 // Every page opens with the same header: an eyebrow, the title, then the test switch, "Jump to" and page actions.
-function pageHead(title, { eyebrow = '', actions = '' } = {}) {
+// switcher: false on pages that are the same whichever test is chosen, such as Settings.
+function pageHead(title, { eyebrow = '', actions = '', switcher = true } = {}) {
   return `<header class="page-head">
       <div class="page-title">${eyebrow ? `<p class="eyebrow">${eyebrow}</p>` : ''}<h1>${title}</h1></div>
       <div class="page-tools">
-        <div class="exam-switch" role="group" aria-label="Test">${EXAM_IDS.map(id => `<button type="button" data-exam="${id}" aria-pressed="${id === examId}"${id === examId ? ' class="on"' : ''} title="${esc(EXAMS[id].long)}">${EXAMS[id].name}</button>`).join('')}</div>
+        ${switcher ? examSwitchHtml() : ''}
         <button type="button" class="jump" data-palette>${icon('search')}<span>Jump to…</span><kbd>⌘K</kbd></button>
         ${actions}
       </div>
@@ -626,14 +763,14 @@ function renderNav(active) {
   const goal = progress.plan.dailyGoal;
   const testRunning = test && !test.finished;
   const sync = syncConfigured ? syncState() : null;
-  const syncText = !sync ? '' : !sync.account ? 'Sign in to sync' : sync.phase === 'error' ? 'Sync problem' : sync.lastSynced ? 'Synced' : 'Syncing…';
+  const syncText = !sync ? '' : !sync.account ? 'Sign in to save your progress' : sync.phase === 'error' ? 'Not saved: a problem' : sync.lastSynced ? 'Saved' : 'Saving…';
   const syncDot = !sync?.account ? '' : sync.phase === 'error' ? 'bad' : 'ok';
-  const current = r => (r === active ? ' class="on" aria-current="page"' : '');
+  const current = r => (r === active || (r === 'review' && ['mistakes', 'cards'].includes(active)) ? ' class="on" aria-current="page"' : '');
   const badge = r => (r === 'review' && due ? `<span class="badge">${due}</span>`
     : r === 'test' && testRunning ? '<span class="badge live">In progress</span>' : '');
 
   const links = [['home', 'Dashboard'], ['scores', 'Scores'], ['practice', 'Practice'], ...(lessonsHere().length ? [['learn', 'Lessons']] : []), ['test', 'Practice test'],
-    ['review', 'Review'], ['mistakes', 'Mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
+    ['review', 'Review'], ['plan', 'Study plan'], ['library', 'Library'],
     ['resources', 'Resources'], ['settings', 'Settings']];
   // Collapsed, the sidebar is a strip of icons; names move into tooltips and accessible labels.
   const collapsed = shell.classList.contains('collapsed');
@@ -647,25 +784,44 @@ function renderNav(active) {
     </div>
     ${testPickerHtml(collapsed)}
     <nav class="side-nav" aria-label="Main">${links.map(([r, label]) => {
-      const name = r === 'review' && due ? `${label}, ${due} due` : r === 'test' && testRunning ? `${label}, in progress` : label;
-      return `<a href="#/${r}"${current(r)} aria-label="${name}"${tip(name)}>${icon(r)}<span class="label">${label}</span>${badge(r)}</a>`;
+      const name = r === 'review' && due ? `${label}, ${due} due` : r === 'test' && testRunning ? `${label}, ${testStatus()}` : label;
+      const sub = r === 'test' && testRunning ? `<small class="nav-sub" data-test-status>${testStatus()}</small>` : '';
+      return `<a href="#/${r}"${current(r)} aria-label="${name}"${tip(name)}>${icon(r)}<span class="label${sub ? ' has-sub' : ''}">${label}${sub}</span>${badge(r)}</a>`;
     }).join('')}</nav>
     ${streakWidget(streak, today, goal, collapsed)}
     ${sync ? `<a class="sync${active === 'account' ? ' on' : ''}" href="#/account" aria-label="${syncText}${sync.account ? `: ${esc(sync.account)}` : ''}"${tip(syncText)}><i class="dot ${syncDot}"></i><span class="label">${syncText}${sync.account ? `<small title="${esc(sync.account)}">${esc(sync.account)}</small>` : ''}</span></a>` : ''}`;
 
+  // Signed out it offers to sign in; signed in it says whether everything is saved.
+  const topSync = !sync ? '' : !sync.account ? '<a class="top-sync signin" href="#/account">Sign in</a>'
+    : `<a class="top-sync ${syncDot}" href="#/account" aria-label="${syncText}: ${esc(sync.account)}">${sync.phase === 'error' ? 'Not saved' : sync.lastSynced ? 'Saved ✓' : 'Saving…'}</a>`;
   topbar.innerHTML = `
     <a class="brand" href="#/home">${APP_NAME}</a>
     <a class="top-streak${streak ? ' on' : ''}" href="#/home" aria-label="${streak ? `${streak}-day streak` : 'No streak yet'}, ${today} of ${goal} questions today">${icon('flame')}<span>${streak}</span></a>
-    ${sync ? `<a class="top-sync" href="#/account" aria-label="${syncText}"><i class="dot ${syncDot}"></i></a>` : ''}`;
+    ${topSync}`;
 
   const tabLinks = [['home', 'Home'], ['practice', 'Practice'], ['test', 'Test'], ['review', 'Review']];
-  const moreLinks = [['scores', 'Scores'], ...(lessonsHere().length ? [['learn', 'Lessons']] : []), ['mistakes', 'Mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
+  const moreLinks = [['scores', 'Scores'], ...(lessonsHere().length ? [['learn', 'Lessons']] : []), ['plan', 'Study plan'], ['library', 'Library'],
     ['resources', 'Resources'], ['settings', 'Settings'], ...(sync ? [['account', sync.account ? 'Account' : 'Sign in']] : [])];
   const inMore = moreLinks.some(([r]) => r === active);
   tabs.innerHTML = `${tabLinks.map(([r, label]) => `<a href="#/${r}"${current(r)}>${icon(r)}<span>${label}</span>${badge(r)}</a>`).join('')}
     <button type="button" id="more-toggle"${inMore ? ' class="on"' : ''} aria-expanded="${!more.hidden}" aria-controls="more">${icon('more')}<span>More</span></button>`;
-  more.innerHTML = moreLinks.map(([r, label]) => `<a href="#/${r}"${current(r)}>${label}<span aria-hidden="true">›</span></a>`).join('');
+  more.innerHTML = `<div class="sheet-tests"><p class="eyebrow">Studying for</p>${examSwitchHtml()}</div>
+    ${moreLinks.map(([r, label]) => `<a href="#/${r}"${current(r)}>${label}<span aria-hidden="true">›</span></a>`).join('')}`;
 }
+
+// How a running timed test stands, for the sidebar: "In progress · 12 min left".
+function testStatus() {
+  if (!test || test.finished) return '';
+  const which = test.exam === examId ? 'In progress' : `${EXAMS[test.exam].name} test in progress`;
+  if (test.onBreak) return `${which} · on a break`;
+  return `${which} · ${Math.max(0, Math.ceil((test.endsAt - Date.now()) / 60000))} min left`;
+}
+// Kept up to date while the test runs, wherever the student is in the app.
+function updateTestStatus() {
+  const line = side.querySelector('[data-test-status]');
+  if (line) line.textContent = testStatus();
+}
+setInterval(updateTestStatus, 15 * 1000);
 
 function toggleSidebar() {
   testMenuOpen = false;   // the chooser folds away with the sidebar, rather than staying open as a column of codes
@@ -683,7 +839,7 @@ function setMore(open) {
 // "Jump to": search pages, the current test's skills, and the other tests.
 function paletteItems() {
   const pages = [['home', 'Dashboard'], ['scores', 'Scores'], ['practice', 'Practice'], ...(lessonsHere().length ? [['learn', 'Lessons']] : []), ['test', 'Practice test'],
-    ['review', 'Review'], ['mistakes', 'Mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
+    ['review', 'Review'], ['review/all', 'All mistakes'], ['plan', 'Study plan'], ['library', 'Library'],
     ['resources', 'Resources'], ['settings', 'Settings'], ...(syncConfigured ? [['account', 'Account']] : [])]
     .map(([route, label]) => ({ label, hint: 'Page', href: `#/${route}` }));
   const skills = exam.sections.flatMap(s => skillsOf(exam, s.id)
@@ -774,6 +930,17 @@ document.addEventListener('keydown', e => {
 
 // ---------- shared question rendering ----------
 
+// The ✕ beside each answer crosses it out, which only a tooltip said, and a phone can't show tooltips. So the first
+// question with answers to cross out says so, once.
+const CROSS_OUT_TIP = 'satprep.tip.crossOut';
+function crossOutTip() {
+  try {
+    if (localStorage.getItem(CROSS_OUT_TIP)) return '';
+    localStorage.setItem(CROSS_OUT_TIP, '1');
+  } catch { return ''; }
+  return '<p class="tip">Tip: tap <strong>✕</strong> beside an answer to cross it out once you’ve ruled it out. Tap again to bring it back.</p>';
+}
+
 // A passage or figure goes in its own reading column, beside the question on wide screens like the real test.
 function questionHtml(q, st = {}) {
   // An ACT science passage is tables and diagrams rather than prose, so it comes as a picture of the page.
@@ -789,7 +956,7 @@ function questionHtml(q, st = {}) {
     : `<div class="stem">${underline(para(q.stem), q.underline)}</div>`;
   let answer;
   if (q.choices) {
-    answer = `<ol class="choices">${q.choices.map(c => {
+    answer = `${st.tools && !st.revealed ? crossOutTip() : ''}<ol class="choices">${q.choices.map(c => {
       const cls = [
         st.selected === c.letter && 'selected',
         st.eliminated?.has(c.letter) && 'eliminated',
@@ -918,7 +1085,7 @@ function countAiUse() {
 }
 const aiLeft = () => (ownKey() ? Infinity : Math.max(0, AI_DAILY_LIMIT - aiUsedToday()));
 const aiLabel = (base, key) => (ownKey() || answeredBefore(key) ? base : aiLeft() ? `${base} · ${aiLeft()} left today` : `${base} · none left today`);
-// A hint or explain button, labelled with what is left today and switched off once it has run out.
+// A hint or explain button, labeled with what is left today and switched off once it has run out.
 function aiButton(base, key, attrs) {
   const out = !aiLeft() && !answeredBefore(key);
   return `<button type="button" class="ghost small" ${attrs} data-base="${esc(base)}" data-key="${esc(key)}"${out ? ` disabled title="Gemini’s free allowance is shared by everyone, so each student gets ${AI_DAILY_LIMIT} a day. More tomorrow."` : ''}>${esc(aiLabel(base, key))}</button>`;
@@ -1038,10 +1205,14 @@ const gradeName = grade => exam.gradeNames?.[grade] ?? `Grade ${grade}`;
 // A section's name where there is room for it; the MCAT's run to fifty characters, too long for a tab.
 const sectionTab = s => (s.name.length > 30 ? s.short : s.name);
 
+// Running on the owner's own computer, where exports can be built into the library; on the website they can't.
+const onOwnComputer = ['localhost', '127.0.0.1'].includes(location.hostname);
+
 function addQuestionsHint() {
   // ACT questions come from ACT's own practice test booklets, which carry a scoring key at the back;
   // without that key a booklet has no answers and no reporting categories, so it cannot be read.
   if (exam.id === 'mcat') return 'MCAT questions are written for this app a section at a time, and more are on the way';
+  if (!onOwnComputer) return `${importLink} (they’re read on this device and stay on it)`;
   return exam.source === 'act'
     ? `${importLink}, or save ACT practice test booklets, with the scoring keys at the back, in the <code>exports/act</code> folder and restart the app`
     : `${importLink}, or save ${exam.long} exports from the College Board Question Bank in the <code>exports</code> folder and restart the app`;
@@ -1052,8 +1223,21 @@ function viewStart() {
   // offered. For the MCAT that is, for now, Chem/Phys alone.
   const placementSections = scoredSections(exam).filter(s => sectionCount(s.id));
   const small = placementSections.some(s => sectionCount(s.id) < 15);
+  // Somebody who has never answered a question, on any test, is told what the app is before being asked anything.
+  const firstVisit = !allResponses().length;
+  const welcome = firstVisit ? `<section class="card welcome">
+      <h2>Welcome to ${APP_NAME}</h2>
+      <p>Free, adaptive practice for the SAT, PSAT, ACT and MCAT. It works in three steps:</p>
+      <ol class="welcome-steps">
+        <li><strong>Find your level.</strong> Take a short placement test, or choose your ${exam.gradeNames ? 'year' : 'grade'}, just below.</li>
+        <li><strong>Practice a little every day.</strong> Questions are matched to you, a daily plan says what to do, and questions you miss come back for review.</li>
+        <li><strong>Check your progress.</strong> Timed practice tests, and an estimated score that gets sharper as you go.</li>
+      </ol>
+      <p class="hint">Studying for a different test? Choose it from the test menu: at the top left, or the row of tests above on a phone.</p>
+    </section>` : '';
   view.innerHTML = `
     ${pageHead('How should we find your level?', { eyebrow: exam.long })}
+    ${welcome}
     <p class="muted">Either way, practice keeps adapting to how you actually do. You can change this later.</p>
     ${syncConfigured && !syncState().account ? '<p class="note">Already studying on another device? <a href="#/account">Sign in</a> to bring your progress here.</p>' : ''}
     <div class="cards">
@@ -1068,7 +1252,7 @@ function viewStart() {
           ? `Start at a typical level for where you are in college. Every topic is open from the start, because the ${exam.name} assumes the introductory science courses.`
           : 'Start at a typical level for your grade. Skills usually taught in later courses are held back until you take the placement test.'}</p>
         <div class="actions">
-          <select id="grade" aria-label="${exam.gradeNames ? 'Year' : 'Grade'}">${exam.grades.map(g => `<option value="${g}" ${progress.profile.grade === g ? 'selected' : ''}>${gradeName(g)}</option>`).join('')}</select>
+          <select id="grade" aria-label="${exam.gradeNames ? 'Year' : 'Grade'}">${exam.grades.map(g => `<option value="${g}" ${(progress.profile.grade ?? exam.usualGrade) === g ? 'selected' : ''}>${gradeName(g)}</option>`).join('')}</select>
           <button id="use-grade">${exam.gradeNames ? 'Use this year' : 'Use this grade'}</button>
         </div>
       </div>
@@ -1211,10 +1395,10 @@ function viewPractice(arg) {
     <div class="bar">
       <div class="seg">${exam.sections.map(s => `<a href="#/practice/${s.id}" class="${s.id === section ? 'active' : ''}">${sectionTab(s)}</a>`).join('')}</div>
       <select id="skill" aria-label="Skill">
-        <option value="">Adaptive: focus on weak spots</option>
+        <option value="">Skill: all, weakest first</option>
         ${skills.map(s => `<option value="${esc(s.name)}" ${s.name === session.skill ? 'selected' : ''}>${esc(skillLabel(s.name))}</option>`).join('')}
       </select>${levelPicker}
-      <span class="tally">${session.correct}/${session.done} this session · ${answeredToday()}/${progress.plan.dailyGoal} today</span>
+      <span class="tally">${session.correct} of ${session.done} right · ${answeredToday()} of ${progress.plan.dailyGoal} today</span>
     </div>`;
   if (!session.q) {
     view.innerHTML = `${header}<div class="empty"><h2>No ${sectionName(section)} questions available</h2><p>To add some, ${addQuestionsHint()}${progress.profile.mode === 'grade' ? ', or take the placement test to unlock skills beyond your grade' : ''}.</p><a class="button primary" href="#/library">Open Library</a></div>`;
@@ -1235,35 +1419,52 @@ function viewPractice(arg) {
 }
 
 // ---------- review ----------
+//
+// One page for everything that comes back: questions due for review today, every question ever missed, and, on a
+// test with lessons, the key-term flashcards. Each has its own tab.
+
+const REVIEW_TABS = [['due', 'Due now'], ['all', 'All mistakes'], ['cards', 'Flashcards']];
 
 function viewReview(arg) {
   if (arg === 'go') return reviewSession();
   session = null;
-  const entries = Object.entries(progress.mistakes).filter(([id, m]) => byId.has(id) && !m.graduated && !m.removed).sort((a, b) => a[1].due - b[1].due);
-  const due = entries.filter(([, m]) => m.due <= Date.now()).length;
-  const reasons = {};
-  for (const [, m] of entries) reasons[m.reason || 'Not tagged'] = (reasons[m.reason || 'Not tagged'] || 0) + 1;
-  const maxReason = Math.max(1, ...Object.values(reasons));
-  view.innerHTML = `
-    ${pageHead('Review', { eyebrow: `${exam.long} · mistake log`, actions: `<button class="primary" id="go" ${due ? '' : 'disabled'}>Review ${plural(due, 'question')}</button>` })}
-    <div class="cards">
-      <div class="card"><div class="big">${due}</div><div class="muted">due now</div></div>
-      <div class="card"><div class="big">${entries.length}</div><div class="muted">in your mistake log. Each one comes back after 1, 3, 7, 14 and 30 days until you've answered it right five times in a row.</div></div>
-      <div class="card"><h3>Why you miss questions</h3>
-        ${entries.length ? Object.entries(reasons).sort((a, b) => b[1] - a[1]).map(([r, n]) => `
-          <div class="skill-row"><span class="name">${esc(r)}</span><div class="track"><div class="fill" style="width:${(n / maxReason) * 100}%"></div></div><span class="pct">${n}</span></div>`).join('')
-          : '<p class="muted">Nothing yet.</p>'}
-      </div>
-    </div>
-    ${cardsHere().length ? flashcardsHtml() : ''}
-    ${entries.length ? `<div class="card"><h2>Mistake log</h2><div class="table-wrap"><table class="stack">
-      <thead><tr><th>Question</th><th>Skill</th><th>Difficulty</th><th>Reason</th><th>Next review</th></tr></thead>
-      <tbody>${entries.map(([id, m]) => {
-        const q = byId.get(id);
-        return `<tr><td>${esc(snippet(q))}</td><td data-label="Skill">${esc(skillLabel(q.skill))}</td><td data-label="Difficulty">${esc(q.difficulty ? levelName(q.difficulty) : '—')}</td><td data-label="Reason">${esc(m.reason || '—')}</td><td data-label="Next review">${m.due <= Date.now() ? 'Now' : new Date(m.due).toLocaleDateString()}</td></tr>`;
-      }).join('')}</tbody></table></div></div>` : ''}`;
+  const hasCards = cardsHere().length > 0;
+  const tab = arg === 'all' || (arg === 'cards' && hasCards) ? arg : 'due';
+  const all = mistakeEntries();
+  const dueNow = all.filter(e => !e.m.graduated && e.m.due <= Date.now());
+  const cards = hasCards ? cardsWaiting() : null;
+  const counts = { due: dueNow.length, all: all.length, cards: cards ? cards.due.length + cards.fresh.length : 0 };
+  const tabs = `<nav class="seg review-tabs" aria-label="Review">${REVIEW_TABS.filter(([id]) => id !== 'cards' || hasCards).map(([id, label]) =>
+    `<a href="#/review${id === 'due' ? '' : `/${id}`}"${id === tab ? ' class="active" aria-current="page"' : ''}>${label}${counts[id] ? ` <span class="count">${counts[id]}</span>` : ''}</a>`).join('')}</nav>`;
+  const shown = all.filter(e => matchesFilter(e) && (mistakeView.section === 'all' || e.q.section === mistakeView.section));
+  const actions = tab === 'due' ? `<button class="primary" id="go" ${dueNow.length ? '' : 'disabled'}>Review ${plural(dueNow.length, 'question')}</button>`
+    : tab === 'all' ? `<button class="primary" id="drill" ${shown.length ? '' : 'disabled'}>Practice ${plural(Math.min(shown.length, 20), 'question')}</button>` : '';
+  const head = pageHead('Review', { eyebrow: `${exam.long} · ${hasCards ? 'mistakes and flashcards' : 'questions you missed'}`, actions });
+
+  if (tab === 'cards') {
+    view.innerHTML = `${head}${tabs}${flashcardsHtml()}`;
+    on('#study-cards', 'click', () => go('cards'));
+    return;
+  }
+  if (tab === 'all') {
+    view.innerHTML = `${head}${tabs}${allMistakesHtml(all, shown)}`;
+    bindMistakeList();
+    on('[data-mfilter]', 'click', e => { mistakeView = { ...mistakeView, filter: e.currentTarget.dataset.mfilter }; quietly(() => viewReview('all')); });
+    on('[data-msection]', 'click', e => { mistakeView = { ...mistakeView, section: e.currentTarget.dataset.msection }; quietly(() => viewReview('all')); });
+    on('#drill', 'click', () => go('mistakes/go'));
+    return;
+  }
+  // Due now: what the review schedule brings back today.
+  const next = all.filter(e => !e.m.graduated && e.m.due > Date.now()).sort((a, b) => a.m.due - b.m.due)[0];
+  view.innerHTML = `${head}${tabs}
+    <p class="muted">Questions you miss come back after 1, 3, 7, 14 and 30 days, until you’ve answered them right five times in a row.</p>
+    ${cards?.due.length ? `<p class="note">${plural(cards.due.length, 'flashcard')} due as well. <a href="#/review/cards">Study them</a></p>` : ''}
+    ${dueNow.length ? mistakeListHtml(dueNow)
+      : `<div class="empty"><h2>Nothing due right now</h2>
+          <p>${next ? `The next question comes back ${new Date(next.m.due).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}.` : all.length ? 'Everything you missed has been learned.' : 'Questions you miss in practice and on timed tests come back here.'}</p>
+          <div class="actions">${all.length ? '<a class="button" href="#/review/all">See all mistakes</a>' : ''}<a class="button primary" href="#/practice">Practice</a></div></div>`}`;
+  bindMistakeList();
   on('#go', 'click', () => go('review/go'));
-  on('#study-cards', 'click', () => go('cards'));
 }
 
 function reviewSession() {
@@ -1273,7 +1474,7 @@ function reviewSession() {
   if (!session.q) {
     const id = session.queue.shift();
     if (!id) {
-      view.innerHTML = `${pageHead('Review', { eyebrow: exam.long })}<div class="empty"><h2>Review complete</h2><p>${session.correct} of ${session.done} correct. Questions you got right come back later; misses return tomorrow.</p><a class="button primary" href="#/home">Back to dashboard</a></div>`;
+      view.innerHTML = `${pageHead('Review', { eyebrow: exam.long })}<div class="empty"><h2>Review complete</h2><p>${session.correct} of ${session.done} right. Questions you got right come back later; misses return tomorrow.</p><a class="button primary" href="#/home">Back to dashboard</a></div>`;
       session = null;
       renderNav('review');
       return;
@@ -1281,7 +1482,7 @@ function reviewSession() {
     session.q = byId.get(id);
     session.st = newDrillState();
   }
-  const header = `<header class="bar"><div><div class="eyebrow">Review · ${exam.name}</div><strong>${plural(session.queue.length + 1, 'question')} left</strong></div><span class="tally">${session.correct}/${session.done} correct</span></header>`;
+  const header = `<header class="bar"><div><div class="eyebrow">Review · ${exam.name}</div><strong>${plural(session.queue.length + 1, 'question')} left</strong></div><span class="tally">${session.correct} of ${session.done} right</span></header>`;
   renderDrill(header, 'review', reviewSession);
 }
 
@@ -1337,7 +1538,7 @@ function viewCards(lessonId) {
       <div class="empty celebrate"><h2>${done ? 'Cards done' : 'Nothing to study right now'}</h2>
         <p>${done ? `${plural(done, 'card')}, ${knew} known first time. Cards you knew come back after a longer gap; the rest come back tomorrow.`
           : 'No cards are due, and today’s new ones are done. More tomorrow.'}</p>
-        <div class="actions"><a class="button primary" href="#/review">Back to Review</a>${lesson ? `<a class="button" href="#/learn/${esc(lesson.id)}">Back to the lesson</a>` : ''}</div></div>`;
+        <div class="actions"><a class="button primary" href="#/review/cards">Back to flashcards</a>${lesson ? `<a class="button" href="#/learn/${esc(lesson.id)}">Back to the lesson</a>` : ''}</div></div>`;
     renderNav('review');
     return;
   }
@@ -1369,7 +1570,7 @@ function viewCards(lessonId) {
     rateCard(progress.cards ||= {}, id, 'missed');
     save();
     session.missed.add(id);
-    // It comes round again a few cards later, so it is practised before the session ends.
+    // It comes round again a few cards later, so it is practiced before the session ends.
     session.queue.shift();
     session.queue.splice(Math.min(3, session.queue.length), 0, id);
     next();
@@ -1377,13 +1578,12 @@ function viewCards(lessonId) {
   $(session.flipped ? '#knew' : '#flip')?.focus({ preventScroll: true });
 }
 
-// ---------- mistakes: everything you have ever missed ----------
+// ---------- all mistakes ----------
 
-// Review is the spaced-repetition queue: it decides what to bring back and when. This is the collection behind
-// it — every question ever missed, kept so it can be looked through, read again, and drilled whenever the
-// student feels like it rather than only when something is due.
+// Review's schedule decides what to bring back and when. Behind it is every question ever missed, kept so it can be
+// looked through, read again, and drilled whenever the student feels like it rather than only when something is due.
 
-const MISTAKE_FILTERS = [['all', 'All'], ['due', 'Due now'], ['learning', 'Still learning'], ['graduated', 'Learned']];
+const MISTAKE_FILTERS = [['all', 'All'], ['learning', 'Still learning'], ['graduated', 'Learned']];
 let mistakeView = { filter: 'all', section: 'all' };
 
 // The answer that put a question in the log: the latest miss, or a right answer marked as a guess.
@@ -1396,69 +1596,69 @@ function mistakeEntries() {
     .sort((a, b) => (a.m.graduated ? 1 : 0) - (b.m.graduated ? 1 : 0) || (a.m.due ?? 0) - (b.m.due ?? 0));
 }
 
-const matchesFilter = ({ m }) => (mistakeView.filter === 'all' ? true
-  : mistakeView.filter === 'due' ? !m.graduated && m.due <= Date.now()
-  : mistakeView.filter === 'learning' ? !m.graduated
-  : Boolean(m.graduated));
+const matchesFilter = ({ m }) => (mistakeView.filter === 'learning' ? !m.graduated : mistakeView.filter === 'graduated' ? Boolean(m.graduated) : true);
 
-function viewMistakes(arg) {
-  if (arg === 'go') return mistakeDrill();
-  session = null;
-  const all = mistakeEntries();
+// Missed questions as a list, each opening to show the question, the answer given, why it was missed, and ways to
+// work on it.
+function mistakeListHtml(entries) {
+  return `<ol class="mistake-list">${entries.map(({ id, m, q }) => {
+    const missed = lastMiss(id);
+    const state = m.graduated ? '<span class="pill good">Learned</span>'
+      : m.due <= Date.now() ? '<span class="pill due">Due now</span>'
+      : `<span class="pill">Back ${new Date(m.due).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>`;
+    return `<li>
+      <details class="mistake">
+        <summary>
+          <span class="mistake-head">
+            <span class="mistake-title">${esc(snippet(q))}</span>
+            <span class="mistake-meta">${esc(skillLabel(q.skill))}${q.difficulty ? ` · ${esc(levelName(q.difficulty))}` : ''}${m.lapses > 1 ? ` · missed ${plural(m.lapses, 'time')}` : ''}${m.reason ? ` · ${esc(m.reason)}` : ''}</span>
+          </span>
+          ${state}
+        </summary>
+        <div class="mistake-body" data-qid="${esc(id)}">
+          ${questionHtml(q, { selected: missed?.choice ?? null, revealed: true, correct: missed?.correct ?? false, guessing: Boolean(missed?.guessed), hideMeta: true })}
+          ${reasonPicker(id)}
+          <div class="actions"><button class="small" data-practice-skill="${esc(q.skill)}" data-practice-section="${q.section}">Practice this skill</button>${aiReady() ? aiButton('Explain this', explainKey(q, lastMiss(q.id)?.choice ?? null), 'data-explain') : ''}</div>
+          ${aiNoteHtml()}
+        </div>
+      </details>
+    </li>`;
+  }).join('')}</ol>`;
+}
+
+function allMistakesHtml(all, shown) {
+  if (!all.length) {
+    return `<div class="empty"><h2>No mistakes yet</h2><p>Questions you get wrong in practice and on timed tests are collected here, so you can look back at them and drill them whenever you like.</p><a class="button primary" href="#/practice">Start practicing</a></div>`;
+  }
   const sections = exam.sections.filter(s => all.some(e => e.q.section === s.id));
   if (!sections.some(s => s.id === mistakeView.section)) mistakeView.section = 'all';
-  const shown = all.filter(e => matchesFilter(e) && (mistakeView.section === 'all' || e.q.section === mistakeView.section));
-  const due = all.filter(e => !e.m.graduated && e.m.due <= Date.now()).length;
-  const learning = all.filter(e => !e.m.graduated).length;
-  const graduated = all.length - learning;
+  const learning = all.filter(e => !e.m.graduated);
+  const due = learning.filter(e => e.m.due <= Date.now()).length;
   const lapses = all.reduce((sum, e) => sum + (e.m.lapses || 0), 0);
-
-  view.innerHTML = `
-    ${pageHead('Mistakes', {
-      eyebrow: `${exam.long} · everything you have missed`,
-      actions: `<button class="primary" id="drill" ${shown.length ? '' : 'disabled'}>Practice ${plural(Math.min(shown.length, 20), 'question')}</button>`,
-    })}
+  const reasons = {};
+  for (const { m } of learning) reasons[m.reason || 'No reason given'] = (reasons[m.reason || 'No reason given'] || 0) + 1;
+  const most = Math.max(1, ...Object.values(reasons));
+  return `
     <div class="kpis">
       <div class="kpi"><span class="eyebrow">Collected</span><strong>${all.length}</strong><span class="muted">${all.length === 1 ? 'question' : 'questions'} missed, or guessed right, at least once</span></div>
-      <div class="kpi"><span class="eyebrow">Still learning</span><strong>${learning}</strong><span class="muted">${due ? `${due} due now` : 'nothing due right now'}</span></div>
-      <div class="kpi"><span class="eyebrow">Learned</span><strong>${graduated}</strong><span class="muted">answered right five times running</span></div>
+      <div class="kpi"><span class="eyebrow">Still learning</span><strong>${learning.length}</strong><span class="muted">${due ? `${due} due now` : 'nothing due right now'}</span></div>
+      <div class="kpi"><span class="eyebrow">Learned</span><strong>${all.length - learning.length}</strong><span class="muted">answered right five times running</span></div>
       <div class="kpi"><span class="eyebrow">Total misses</span><strong>${lapses}</strong><span class="muted">including repeats of the same question</span></div>
     </div>
-    ${all.length ? `
-      <div class="filter-bar">
-        <div class="chips" role="group" aria-label="Show">${MISTAKE_FILTERS.map(([id, label]) =>
-          `<button type="button" class="chip${mistakeView.filter === id ? ' active' : ''}" data-mfilter="${id}" aria-pressed="${mistakeView.filter === id}">${label}</button>`).join('')}</div>
-        ${sections.length > 1 ? `<div class="chips" role="group" aria-label="Section">${[['all', sections.length > 2 ? 'All sections' : 'Both sections'], ...sections.map(s => [s.id, s.short])].map(([id, label]) =>
-          `<button type="button" class="chip${mistakeView.section === id ? ' active' : ''}" data-msection="${id}" aria-pressed="${mistakeView.section === id}">${esc(label)}</button>`).join('')}</div>` : ''}
-      </div>
-      ${shown.length ? `<ol class="mistake-list">${shown.map(({ id, m, q }) => {
-        const missed = lastMiss(id);
-        const state = m.graduated ? '<span class="pill good">Learned</span>'
-          : m.due <= Date.now() ? '<span class="pill due">Due now</span>'
-          : `<span class="pill">Back ${new Date(m.due).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>`;
-        return `<li>
-          <details class="mistake">
-            <summary>
-              <span class="mistake-head">
-                <span class="mistake-title">${esc(snippet(q))}</span>
-                <span class="mistake-meta">${esc(skillLabel(q.skill))}${q.difficulty ? ` · ${esc(levelName(q.difficulty))}` : ''}${m.lapses > 1 ? ` · missed ${plural(m.lapses, 'time')}` : ''}${m.reason ? ` · ${esc(m.reason)}` : ''}</span>
-              </span>
-              ${state}
-            </summary>
-            <div class="mistake-body" data-qid="${esc(id)}">
-              ${questionHtml(q, { selected: missed?.choice ?? null, revealed: true, correct: missed?.correct ?? false, guessing: Boolean(missed?.guessed), hideMeta: true })}
-              ${reasonPicker(id)}
-              <div class="actions"><button class="small" data-practice-skill="${esc(q.skill)}" data-practice-section="${q.section}">Practice this skill</button>${aiReady() ? aiButton('Explain this', explainKey(q, lastMiss(q.id)?.choice ?? null), 'data-explain') : ''}</div>
-              ${aiNoteHtml()}
-            </div>
-          </details>
-        </li>`;
-      }).join('')}</ol>`
-        : `<div class="empty"><h2>Nothing here</h2><p>No mistakes match that filter.</p></div>`}`
-      : `<div class="empty"><h2>No mistakes yet</h2><p>Questions you get wrong in practice and on timed tests are collected here, so you can look back at them and drill them whenever you like.</p><a class="button primary" href="#/practice">Start practicing</a></div>`}`;
+    ${learning.length ? `<div class="card"><h3>Why you miss questions</h3>
+      ${Object.entries(reasons).sort((a, b) => b[1] - a[1]).map(([r, n]) => `
+        <div class="skill-row"><span class="name">${esc(r)}</span><div class="track"><div class="fill" style="width:${(n / most) * 100}%"></div></div><span class="pct">${n}</span></div>`).join('')}
+    </div>` : ''}
+    <div class="filter-bar">
+      <div class="chips" role="group" aria-label="Show">${MISTAKE_FILTERS.map(([id, label]) =>
+        `<button type="button" class="chip${mistakeView.filter === id ? ' active' : ''}" data-mfilter="${id}" aria-pressed="${mistakeView.filter === id}">${label}</button>`).join('')}</div>
+      ${sections.length > 1 ? `<div class="chips" role="group" aria-label="Section">${[['all', sections.length > 2 ? 'All sections' : 'Both sections'], ...sections.map(s => [s.id, s.short])].map(([id, label]) =>
+        `<button type="button" class="chip${mistakeView.section === id ? ' active' : ''}" data-msection="${id}" aria-pressed="${mistakeView.section === id}">${esc(label)}</button>`).join('')}</div>` : ''}
+    </div>
+    ${shown.length ? mistakeListHtml(shown) : '<div class="empty"><h2>Nothing here</h2><p>No mistakes match that filter.</p></div>'}`;
+}
 
-  on('[data-mfilter]', 'click', e => { mistakeView = { ...mistakeView, filter: e.currentTarget.dataset.mfilter }; viewMistakes(); });
-  on('[data-msection]', 'click', e => { mistakeView = { ...mistakeView, section: e.currentTarget.dataset.msection }; viewMistakes(); });
+function bindMistakeList() {
   on('[data-practice-skill]', 'click', e => practiceSkill(e.currentTarget.dataset.practiceSection, e.currentTarget.dataset.practiceSkill));
   // Every open mistake has its own reason buttons, so each one is tagged with the question it belongs to.
   on('.mistake-body [data-reason]', 'click', e => {
@@ -1477,7 +1677,12 @@ function viewMistakes(arg) {
     showAi(e.currentTarget, body.querySelector('.ai-note'),
       () => explainQuestion(q, { chosen: missed?.choice ?? null, correct: missed?.correct ?? false, examName: exam.name }), 'Explanation');
   });
-  on('#drill', 'click', () => go('mistakes/go'));
+}
+
+// The old Mistakes page's address, kept for bookmarks: its drill still lives here, and the rest is Review's tab.
+function viewMistakes(arg) {
+  if (arg === 'go') return mistakeDrill();
+  location.replace('#/review/all');
 }
 
 // Drilling from here works like Review, except it takes whatever is on screen instead of only what is due.
@@ -1493,17 +1698,17 @@ function mistakeDrill() {
     if (!id) {
       const { correct, done } = session;
       session = null;
-      view.innerHTML = `${pageHead('Mistakes', { eyebrow: exam.long })}
+      view.innerHTML = `${pageHead('Review', { eyebrow: exam.long })}
         <div class="empty celebrate"><h2>${done && correct === done ? 'Every one right.' : 'Session complete'}</h2>
-        <p>${correct} of ${done} correct. The ones you got right move further down your review schedule; the ones you missed come back tomorrow.</p>
-        <div class="actions"><a class="button primary" href="#/mistakes">Back to mistakes</a><a class="button" href="#/home">Dashboard</a></div></div>`;
-      renderNav('mistakes');
+        <p>${correct} of ${done} right. The ones you got right move further down your review schedule; the ones you missed come back tomorrow.</p>
+        <div class="actions"><a class="button primary" href="#/review/all">Back to all mistakes</a><a class="button" href="#/home">Dashboard</a></div></div>`;
+      renderNav('review');
       return;
     }
     session.q = byId.get(id);
     session.st = newDrillState();
   }
-  const header = `<header class="bar"><div><div class="eyebrow">Mistakes · ${exam.name}</div><strong>${plural(session.queue.length + 1, 'question')} left</strong></div><span class="tally">${session.correct}/${session.done} correct</span></header>`;
+  const header = `<header class="bar"><div><div class="eyebrow">Review · all mistakes · ${exam.name}</div><strong>${plural(session.queue.length + 1, 'question')} left</strong></div><span class="tally">${session.correct} of ${session.done} right</span></header>`;
   renderDrill(header, 'review', mistakeDrill);
 }
 
@@ -1554,7 +1759,7 @@ function viewTest() {
     ${short.length ? `<p class="note">A full-length test needs ${short.map(s => `${s.perModule * s.modules} ${s.name}`).join(', ')} questions that can be scored automatically. You have ${short.map(s => `${testableCount(s.id)} ${s.name}`).join(', ')}, so sections will be shorter until you add more.</p>` : ''}
     ${progress.tests.length ? `<div class="card"><h2>Past tests</h2><div class="table-wrap"><table class="stack">
       <thead><tr><th>Date</th><th>Test</th>${scored.map(s => `<th>${s.name}</th>`).join('')}<th>${exam.total.label ?? 'Total'}</th></tr></thead>
-      <tbody>${testHistory().reverse().map(t => `<tr><td>${new Date(takenAt(t)).toLocaleDateString()}</td><td data-label="Test">${esc(t.kind)}${t.timeFactor ? ` <span class="muted">· ${TIME_NAMES[t.timeFactor] ?? 'extended time'}</span>` : ''}</td>
+      <tbody>${testHistory().reverse().map(t => `<tr><td>${shortDate(takenAt(t))}</td><td data-label="Test">${esc(t.kind)}${t.timeFactor ? ` <span class="muted">· ${TIME_NAMES[t.timeFactor] ?? 'extended time'}</span>` : ''}</td>
         ${scored.map(s => `<td data-label="${s.name}">${t.summary[s.id] ? `${t.summary[s.id].score.mid}${t.summary[s.id].total ? ` <span class="muted">(${t.summary[s.id].correct}/${t.summary[s.id].total})</span>` : ''}` : '—'}</td>`).join('')}
         <td data-label="${exam.total.label ?? 'Total'}">${t.total ? t.total.mid : '—'}</td></tr>`).join('')}</tbody>
     </table></div></div>` : ''}`;
@@ -1595,8 +1800,12 @@ function beginModule() {
   testScreen();
 }
 
+// While a question is on screen in a timed test, a phone hides its bottom tabs, so a stray tap can't leave the test.
+const setInTest = on => document.body.classList.toggle('in-test', on);
+
 function testScreen() {
   const s = test;
+  setInTest(true);
   const format = sectionOf(exam, s.section);
   const short = s.questions.length < format.perModule;
   const toolButton = (tool, label, attrs) => (format.tools.includes(tool) ? `<button class="ghost small ${attrs.active ? 'active' : ''}" ${attrs.html}>${label}</button>` : '');
@@ -1604,7 +1813,7 @@ function testScreen() {
     <div class="test ${s.highlightMode ? 'highlighting' : ''}">
       <header class="test-bar">
         <div><strong>${format.name}</strong>${format.modules > 1 ? ` · Module ${s.module}` : ''}${short ? ` <span class="muted">(${plural(s.questions.length, 'question')})</span>` : ''}${s.timeFactor > 1 ? ` <span class="muted">· ${TIME_NAMES[s.timeFactor]}</span>` : ''}</div>
-        <div><span id="timer" class="timer ${s.hideTimer ? 'concealed' : ''}"></span><button class="ghost small" id="toggle-timer">${s.hideTimer ? 'Show timer' : 'Hide'}</button></div>
+        <div><span id="timer" class="timer ${s.hideTimer ? 'concealed' : ''}"></span><button class="ghost small" id="toggle-timer">${s.hideTimer ? 'Show timer' : 'Hide'}</button><button class="ghost small exit-test" id="exit-test">Exit test</button></div>
         <div class="tools">
           ${toolButton('highlighter', 'Highlighter', { active: s.highlightMode, html: 'id="hl"' })}
           ${toolButton('calculator', 'Calculator', { active: s.panel === 'calc', html: 'data-panel="calc"' })}
@@ -1616,6 +1825,7 @@ function testScreen() {
         <aside class="panel" id="panel" ${s.panel ? '' : 'hidden'}></aside>
       </div>
     </div>`;
+  confirmButton('#exit-test', 'Tap again: its timer keeps going', () => go('home'));
   on('#toggle-timer', 'click', e => {
     s.hideTimer = !s.hideTimer;
     $('#timer').classList.toggle('concealed', s.hideTimer);
@@ -1644,6 +1854,7 @@ function testScreen() {
 function tick() {
   if (!test || test.finished || test.onBreak || test.exam !== examId) return clearInterval(ticker);
   const left = test.endsAt - Date.now();
+  if (Date.now() % 15000 < 1000) updateTestStatus();
   const timer = document.getElementById('timer');
   if (timer) {
     timer.textContent = clock(left);
@@ -1800,6 +2011,7 @@ function submitModule() {
 
 function moduleBreak() {
   const s = test;
+  setInTest(false);
   const format = sectionOf(exam, s.section);
   const newSection = s.module === 1;
   const nextLabel = `${format.name}${format.modules > 1 ? `, module ${s.module}` : ''}`;
@@ -1844,6 +2056,7 @@ function finishTest() {
 
 function testResults() {
   const s = test;
+  setInTest(false);
   const { summary, total } = s.record;
   const all = s.results.flatMap(r => r.responses.map(x => ({ ...x, section: r.section, module: r.module })));
   // Time a question in each section, on average, beside what test day allows (with the extra time this test had).
@@ -1892,14 +2105,15 @@ const REFERENCE_SHEET = `<div class="ref"><h3>Formulas</h3><p class="hint">Model
 
 // ---------- dashboard: today's plan, skills table, and an at-a-glance rail ----------
 
-let skillTable = { filter: 'all', sort: 'mastery', dir: 1 };
+let skillTable = { filter: 'all', sort: 'mastery', dir: 1, all: false };
+const SKILLS_SHOWN = 6;
 
 function weakestSkills(n) {
   return exam.sections.flatMap(sec => skillAbilities(progress, sec.id, exam).filter(s => s.answered >= 2))
     .sort((a, b) => a.theta - b.theta).slice(0, n);
 }
 
-const studyDays = () => new Set(allResponses().map(r => dayKey(r.at)));
+const studyDays = () => new Set(allResponses().filter(gaveAnswer).map(r => dayKey(r.at)));
 
 const bestStreak = () => longestStreak(studyDays());
 
@@ -2013,7 +2227,7 @@ function skillsTableHtml() {
       </div>
       <div class="table-wrap"><table class="skills-table stack">
         <thead><tr>${th('skill', 'Skill')}${showSection ? '<th>Section</th>' : ''}${th('mastery', 'Mastery')}${th('accuracy', 'Accuracy', 'num')}${th('answered', 'Answered', 'num')}<th><span class="visually-hidden">Practice</span></th></tr></thead>
-        <tbody>${rows.length ? rows.map(r => `<tr>
+        <tbody>${rows.length ? rows.slice(0, skillTable.all ? rows.length : SKILLS_SHOWN).map(r => `<tr>
           <td>${esc(skillLabel(r.name))}</td>
           ${showSection ? `<td data-label="Section">${esc(r.sectionShort)}</td>` : ''}
           <td data-label="Mastery">${r.mastery == null ? '<span class="muted nowrap">not started</span>' : `<span class="mastery"><span class="track"><span class="fill ${masteryClass(r.mastery)}" style="width:${Math.round(r.mastery * 100)}%"></span></span><span class="pct">${Math.round(r.mastery * 100)}%</span></span>`}</td>
@@ -2022,6 +2236,7 @@ function skillsTableHtml() {
           <td class="num"><button type="button" class="small" data-skill="${esc(r.name)}" data-section="${r.section}" aria-label="Practice ${esc(skillLabel(r.name))}">Practice</button></td>
         </tr>`).join('') : '<tr><td colspan="6" class="muted">No skills with questions yet.</td></tr>'}</tbody>
       </table></div>
+      ${rows.length > SKILLS_SHOWN ? `<div class="table-more"><button type="button" class="link" id="skills-more" aria-expanded="${skillTable.all}">${skillTable.all ? 'Show fewer' : `Show all ${rows.length} skills`}</button></div>` : ''}
     </section>`;
 }
 
@@ -2034,6 +2249,7 @@ function bindSkillsTable() {
     redrawSkillsTable(key);
   });
   on('.table-card [data-skill]', 'click', e => practiceSkill(e.currentTarget.dataset.section, e.currentTarget.dataset.skill));
+  on('#skills-more', 'click', () => { skillTable = { ...skillTable, all: !skillTable.all }; redrawSkillsTable(); $('#skills-more')?.focus(); });
 }
 
 function redrawSkillsTable(focusSort) {
@@ -2089,8 +2305,8 @@ function viewScores() {
   const target = progress.plan.target;
   const history = testHistory().filter(t => t.total);
   const weekAgo = Date.now() - 7 * DAY_MS;
-  const thisWeek = progress.responses.filter(r => r.at > weekAgo).length;
-  const lastWeek = progress.responses.filter(r => r.at <= weekAgo && r.at > weekAgo - 7 * DAY_MS).length;
+  const thisWeek = progress.responses.filter(r => gaveAnswer(r) && r.at > weekAgo).length;
+  const lastWeek = progress.responses.filter(r => gaveAnswer(r) && r.at <= weekAgo && r.at > weekAgo - 7 * DAY_MS).length;
   const recent = progress.responses.slice(-100);
   const accuracy = recent.length ? Math.round((recent.filter(r => r.correct).length / recent.length) * 100) : null;
   const due = dueMistakes(progress.mistakes).filter(id => byId.has(id)).length;
@@ -2125,12 +2341,19 @@ function viewScores() {
         .map(s => ({ ...s, p: pCorrect(s.theta, DIFFICULTY_B.Medium) })).sort((a, b) => a.p - b.p);
       return `<section class="card">
         <header class="card-head"><h2>${sec.name}</h2><span class="muted">weakest first</span></header>
-        ${skills.length ? `<ul class="skill-list">${skills.map(s => `<li><span>${esc(skillLabel(s.name))}</span><span class="mastery-chip ${masteryClass(s.p)}"><i aria-hidden="true"></i>${masteryName(s.p)} · ${Math.round(s.p * 100)}%</span><button type="button" class="small ghost" data-skill="${esc(s.name)}" data-section="${sec.id}" aria-label="Practice ${esc(skillLabel(s.name))}">Practice</button></li>`).join('')}</ul>`
+        ${skills.length ? `<ul class="skill-list">${skills.map((s, i) => `<li${i >= 5 ? ' class="extra"' : ''}><span>${esc(skillLabel(s.name))}</span><span class="mastery-chip ${masteryClass(s.p)}"><i aria-hidden="true"></i>${masteryName(s.p)} · ${Math.round(s.p * 100)}%</span><button type="button" class="link practice-link" data-skill="${esc(s.name)}" data-section="${sec.id}" aria-label="Practice ${esc(skillLabel(s.name))}">Practice ›</button></li>`).join('')}</ul>
+          ${skills.length > 5 ? `<button type="button" class="link show-all" data-show-all aria-expanded="false">Show all ${skills.length}</button>` : ''}`
           : '<p class="muted">No answers in this section yet.</p>'}
       </section>`;
     }).join('')}</div>
     <p class="hint">Estimates come from your answers and each question's difficulty. They aren't official ${exam.maker} scores.</p>`;
   on('[data-skill]', 'click', e => practiceSkill(e.currentTarget.dataset.section, e.currentTarget.dataset.skill));
+  on('[data-show-all]', 'click', e => {
+    const list = e.currentTarget.previousElementSibling;
+    const open = list.classList.toggle('expanded');
+    e.currentTarget.setAttribute('aria-expanded', String(open));
+    e.currentTarget.textContent = open ? 'Show fewer' : `Show all ${list.children.length}`;
+  });
   bindTrend(history);
   bindOfficialScores();
 }
@@ -2155,13 +2378,13 @@ function pacingHtml() {
         const [state, label] = paceState(typical, pace);
         return `<li><span class="name">${esc(sectionTab(sec))}</span>
           <span class="pace-track" aria-hidden="true"><i class="pace-fill ${state}" style="width:${Math.min(100, (typical / (pace * 2)) * 100)}%"></i><i class="pace-mark"></i></span>
-          <span class="pace-num">${clock(typical)} <small>vs ${clock(pace)}</small></span>
+          <span class="pace-num">${clock(typical)} <small>a question · test day ${clock(pace)}</small></span>
           <span class="mastery-chip ${state}"><i aria-hidden="true"></i>${label}</span></li>`;
       }).join('')}</ul>` : '<p class="muted">Answer at least five questions in a section to see how your pace compares with test day.</p>'}
       ${slow.length ? `<h3>Right, but slow</h3>
         <p class="hint">You usually get these right, so speed is what’s left to work on.</p>
-        <ul class="skill-list">${slow.map(k => `<li><span>${esc(skillLabel(k.name))}</span><span class="muted">${clock(k.typical)} vs ${clock(k.pace)}</span>
-          <button type="button" class="small ghost" data-skill="${esc(k.name)}" data-section="${k.section}" aria-label="Practice ${esc(skillLabel(k.name))}">Practice</button></li>`).join('')}</ul>` : ''}
+        <ul class="skill-list">${slow.map(k => `<li><span>${esc(skillLabel(k.name))}</span><span class="muted">${clock(k.typical)} a question · test day ${clock(k.pace)}</span>
+          <button type="button" class="link practice-link" data-skill="${esc(k.name)}" data-section="${k.section}" aria-label="Practice ${esc(skillLabel(k.name))}">Practice ›</button></li>`).join('')}</ul>` : ''}
       <p class="hint">The line on each bar is test-day pace: ${exam.sections.map(sec => `${clock(paceMs(sec.id))} a question in ${sectionTab(sec)}`).join(', ')}${extra}. Your time is the middle of your last 60 answers in the section, from practice, review and timed tests.</p>
     </section>`;
 }
@@ -2187,7 +2410,7 @@ function officialScoresHtml() {
   const versus = t => {
     if (!t.total || !t.estimate) return '—';
     const gap = t.total.mid - t.estimate.mid;
-    return `${t.estimate.mid}${gap ? ` <span class="muted">(${gap > 0 ? `${gap} under` : `${-gap} over`})</span>` : ''}`;
+    return `${t.estimate.mid}${gap ? ` <span class="muted">· the app was ${Math.abs(gap)} ${gap > 0 ? 'lower' : 'higher'}</span>` : ''}`;
   };
   return `<section class="card official">
       <header class="card-head"><h2>${info.title}</h2><span class="muted">${logged.length ? plural(logged.length, 'test') + ' logged' : 'none logged yet'}</span></header>
@@ -2201,7 +2424,7 @@ function officialScoresHtml() {
       <p class="warn" id="official-error" role="alert"></p>
       ${logged.length ? `<div class="table-wrap"><table class="stack">
         <thead><tr><th>Taken</th><th>Test</th>${exam.sections.map(sec => `<th class="num">${sec.short}</th>`).join('')}<th class="num">${exam.total.label ?? 'Total'}</th><th class="num">App’s estimate then</th><th><span class="visually-hidden">Remove</span></th></tr></thead>
-        <tbody>${[...logged].reverse().map(t => `<tr><td>${new Date(takenAt(t)).toLocaleDateString()}</td><td data-label="Test">${esc(t.kind)}</td>
+        <tbody>${[...logged].reverse().map(t => `<tr><td>${shortDate(takenAt(t))}</td><td data-label="Test">${esc(t.kind)}</td>
           ${exam.sections.map(sec => `<td class="num" data-label="${sec.short}">${t.summary[sec.id]?.score.mid ?? '—'}</td>`).join('')}
           <td class="num" data-label="${exam.total.label ?? 'Total'}"><strong>${t.total?.mid ?? '—'}</strong></td>
           <td class="num" data-label="App’s estimate then">${versus(t)}</td>
@@ -2428,7 +2651,7 @@ function suggestedDailyGoal(days, gap) {
   let goal = 20;
   if (scaledGap > 0) goal += scaledGap / 5;
   if (days != null && days <= 14 && scaledGap > 0) goal += 10;
-  return Math.max(15, Math.min(60, Math.round(goal / 5) * 5));
+  return Math.max(15, Math.min(40, Math.round(goal / 5) * 5));
 }
 
 function testCadence(days) {
@@ -2534,7 +2757,6 @@ function viewLibrary() {
     ${pageHead('Question library', { eyebrow: exam.long })}
     ${source}
     ${originalsNote}
-    ${['cb', 'act'].includes(exam.source) ? `<p class="hint">Have question PDFs of your own? You can ${importLink} — they are read on this device and stay on it.</p>` : ''}
     ${sharedLibraryCard()}
     ${library.warnings.length ? `<div class="card"><h2>Skipped questions</h2>${library.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}</div>` : ''}
     <div class="card">
@@ -2623,7 +2845,7 @@ function testersPanel(panel) {
     <h3>Who has joined</h3>
     ${panel.testers.length ? `<ul class="tester-list">${panel.testers.map(t => `
         <li><span>${esc(t.name || 'An account with no name')}${t.name === TEST_ACCOUNT_NAME ? ' <span class="pill">your personal link</span>' : ''}</span>
-          <span class="hint">${t.joinedAt ? `joined ${new Date(t.joinedAt).toLocaleDateString()}` : 'added by hand'}</span>
+          <span class="hint">${t.joinedAt ? `joined ${shortDate(t.joinedAt)}` : 'added by hand'}</span>
           <button type="button" class="link" data-remove-tester="${esc(t.uid)}">Remove</button></li>`).join('')}</ul>` : '<p class="hint">Nobody has joined yet.</p>'}
     ${panel.testers.some(oldGuest) ? '<p class="hint">Entries named “Personal link · …” came from the old guest links, which no longer work, so they can be removed.</p>' : ''}`;
 }
@@ -2848,7 +3070,7 @@ function viewJoin(kind, code) {
   const personal = kind === 'personal';
   const link = pendingJoin();
   const sync = syncConfigured ? syncState() : null;
-  const head = pageHead(personal ? 'Your test account' : 'You’re invited', { eyebrow: APP_NAME });
+  const head = pageHead(personal ? 'Your test account' : 'You’re invited', { eyebrow: APP_NAME, switcher: false });
   const next = '<div class="actions"><a class="button primary" href="#/home">Start studying</a></div>';
   if (!sync) {
     view.innerHTML = `${head}<p class="note">This copy of ${APP_NAME} has no shared library, so there is nothing to join.</p>`;
@@ -2937,8 +3159,8 @@ function viewImport() {
         : ''}
     </div>` : '';
   view.innerHTML = `
-    ${pageHead('Your own questions', { eyebrow: exam.long })}
-    <p class="muted">Practise with question PDFs of your own. They are read here on this device and stay on it:
+    ${pageHead('Your own questions', { eyebrow: APP_NAME, switcher: false })}
+    <p class="muted">Practice with question PDFs of your own. They are read here on this device and stay on it:
       the file is never uploaded, and nothing about it is sent anywhere.</p>
     <div class="card">
       <h2>Add a PDF</h2>
@@ -3012,7 +3234,7 @@ async function refreshImports() {
 
 const SETTING_GROUPS = [
   ['theme', 'Theme', 'Light, dark, or whatever your device is set to.'],
-  ['accent', 'Accent colour', 'Used for the active page, streaks, highlights and charts.'],
+  ['accent', 'Accent color', 'Used for the active page, streaks, highlights and charts.'],
   ['textsize', 'Text size', 'Scales the questions, passages and everything else.'],
   ['contrast', 'Contrast', 'Turn this up if text or borders are hard to make out.'],
   ['motion', 'Animation', 'How much the app moves as pages and answers appear.'],
@@ -3020,6 +3242,17 @@ const SETTING_GROUPS = [
   ['explain', 'Explain with AI', `A hint before you answer, and an explanation afterwards, written by Google’s Gemini. It needs you to be signed in, or your own Gemini key (below), and each student gets ${AI_DAILY_LIMIT} a day from the shared allowance. Questions you ask about are sent to Google.`],
   ['questions', 'Questions written for this app', 'Alongside the official College Board and ACT questions there are 400 SAT-style ones written for this app, each answer checked by a test. Your progress on them is kept either way.'],
 ];
+// A question the way it looks with the settings chosen, shown right under the settings that change it.
+const SAMPLE_CARD = `<div class="card">
+      <h3>Sample</h3>
+      <p class="hint">A question the way it will look with these settings.</p>
+      <div class="passage">Some critics dismissed the novel as simplistic. <u class="ul">Yet its short sentences, which at first seem plain, gradually build a rhythm that mirrors the narrator’s anxiety.</u></div>
+      <div class="sample-row">
+        <span class="mastery-chip high"><i aria-hidden="true"></i>Strong · 82%</span>
+        <span class="mastery-chip mid"><i aria-hidden="true"></i>Building · 58%</span>
+        <span class="mastery-chip low"><i aria-hidden="true"></i>Needs work · 31%</span>
+      </div>
+    </div>`;
 // How the Settings page groups them.
 const SETTING_SECTIONS = [
   ['Appearance', ['theme', 'accent']],
@@ -3120,7 +3353,7 @@ function bindOwnKeyCard() {
 
 function viewSettings() {
   view.innerHTML = `
-    ${pageHead('Settings', { eyebrow: APP_NAME })}
+    ${pageHead('Settings', { eyebrow: APP_NAME, switcher: false })}
     <p class="muted">These settings belong to this device, not your account, so a phone and a laptop can each be set up the way that suits them.</p>
     ${SETTING_SECTIONS.map(([heading, keys]) => {
       const cards = SETTING_GROUPS.filter(([key]) => keys.includes(key) && (key !== 'explain' || explainConfigured)
@@ -3144,7 +3377,7 @@ function viewSettings() {
           </div>
         </section>`;
       }).join('');
-      return cards ? `<h2 class="settings-heading">${heading}</h2><div class="settings-grid">${cards}</div>` : '';
+      return cards ? `<h2 class="settings-heading">${heading}</h2><div class="settings-grid">${cards}</div>${heading === 'Accessibility' ? SAMPLE_CARD : ''}` : '';
     }).join('')}
     ${settings.explain === 'on' ? ownKeyCardHtml() : ''}
     <h2 class="settings-heading">This browser</h2>
@@ -3157,16 +3390,6 @@ function viewSettings() {
             open it again from here, or with “Jump to”.</p>
            <div class="actions"><button type="button" data-open-blank="home">Open in an about:blank tab</button></div>`}
     </section></div>
-    <div class="card">
-      <h2>Sample</h2>
-      <p class="hint">A question the way it will look with these settings.</p>
-      <div class="passage">Some critics dismissed the novel as simplistic. <u class="ul">Yet its short sentences, which at first seem plain, gradually build a rhythm that mirrors the narrator’s anxiety.</u></div>
-      <div class="sample-row">
-        <span class="mastery-chip high"><i aria-hidden="true"></i>Strong · 82%</span>
-        <span class="mastery-chip mid"><i aria-hidden="true"></i>Building · 58%</span>
-        <span class="mastery-chip low"><i aria-hidden="true"></i>Needs work · 31%</span>
-      </div>
-    </div>
     <div class="card">
       <h2>Reset progress</h2>
       <p class="hint">This erases your ${exam.name} practice history, mistake log, test results and study plan${syncConfigured ? ' on every device signed in to your account' : ''}. Your other tests aren't affected.</p>
@@ -3310,19 +3533,19 @@ function viewResources() {
 
 function viewAccount() {
   if (!syncConfigured) {
-    view.innerHTML = `${pageHead('Account')}<p class="note">Cloud sync isn't set up for this copy of ${APP_NAME}, so progress stays on this device.</p>`;
+    view.innerHTML = `${pageHead('Account', { switcher: false })}<p class="note">Saving to an account isn’t set up for this copy of ${APP_NAME}, so progress stays on this device.</p>`;
     return;
   }
   const sync = syncState();
   if (sync.phase === 'loading') {
-    view.innerHTML = `${pageHead('Account')}<p class="muted">Connecting…</p>`;
+    view.innerHTML = `${pageHead('Account', { switcher: false })}<p class="muted">Connecting…</p>`;
     return;
   }
   if (sync.account) {
     const time = sync.lastSynced && new Date(sync.lastSynced).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    const status = sync.phase === 'error' ? sync.message : sync.phase === 'synced' ? `Up to date${time ? ` · last synced ${time}` : ''}.` : 'Syncing…';
+    const status = sync.phase === 'error' ? sync.message : sync.phase === 'synced' ? `Everything is saved to your account${time ? ` (last saved ${time})` : ''}.` : 'Saving…';
     view.innerHTML = `
-      ${pageHead('Account')}
+      ${pageHead('Account', { switcher: false })}
       <div class="card">
         <p>Signed in as <strong>${esc(sync.account)}</strong>.</p>
         ${sync.testAccount ? '<p class="hint">This is your test account, from your personal link. Its progress is its own, and is saved on every device that opens the link. To use your own account here instead, sign out, then sign in.</p>' : ''}
@@ -3348,7 +3571,7 @@ function viewAccount() {
   }
 
   view.innerHTML = `
-    ${pageHead('Sign in to sync')}
+    ${pageHead('Sign in to save your progress', { switcher: false })}
     <p class="muted">Keep your progress on every device you study on. Progress already on this device is added to your account.</p>
     ${signInFormsHtml(sync)}`;
   bindSignInForms();
@@ -3363,11 +3586,11 @@ function signInFormsHtml(sync) {
         <button class="primary" id="google">Sign in with Google</button>
       </div>
       <form class="card" id="username-form">
-        <h2>Username and passcode</h2>
+        <h2>Username and password</h2>
         <label class="field">Username <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
-        <label class="field">Passcode <input name="passcode" type="password" autocomplete="current-password" required></label>
+        <label class="field">Password <input name="passcode" type="password" autocomplete="current-password" required></label>
         <div class="actions"><button class="primary" data-mode="sign-in">Sign in</button><button data-mode="create">Create account</button></div>
-        <p class="hint">A forgotten passcode can't be recovered, so keep it somewhere safe.</p>
+        <p class="hint">A forgotten password can’t be recovered, so keep it somewhere safe.</p>
       </form>
     </div>
     <p class="warn" id="auth-error" role="alert">${esc(sync.phase === 'error' ? sync.message : '')}</p>`;
@@ -3417,7 +3640,7 @@ async function loadLibrary() {
     // No built library yet.
   }
   // Nothing built, so the questions written for this app are the library. They ship in the repo, so this is
-  // what every visitor who has not imported their own exports actually practises with.
+  // what every visitor who has not imported their own exports actually practices with.
   return { source: 'original', questions: [...ORIGINAL_QUESTIONS, ...DEMO_QUESTIONS], files: 0, warnings: [] };
 }
 

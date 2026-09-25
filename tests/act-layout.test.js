@@ -44,7 +44,7 @@ function englishPages() {
   const underlined = 'floating pigment';
   const marked = span(63, PASSAGE_1, underlined);   // the first line of a paragraph is indented
   const first = page([
-    // The booklets set this centred heading as one piece of text spanning both columns.
+    // The booklets set this centered heading as one piece of text spanning both columns.
     [{ str: 'ENGLISH TEST', x: 262, y: 702, w: 88, h: 11 }],
     words(42, 506, 'PASSAGE I'),
     words(94, 486, 'A Short History of Marbled Paper'),

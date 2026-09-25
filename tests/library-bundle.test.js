@@ -37,7 +37,7 @@ test('every picture a question uses is found, each once', () => {
   assert.equal(pictureIds([QUESTIONS[1]]).size, 0, 'a text-only question uses none');
 });
 
-// The science reader added q.passageImage and nothing else learnt about it, so the build script pruned
+// The science reader added q.passageImage and nothing else learned about it, so the build script pruned
 // every passage picture as unused and the packer shipped the questions pointing at files that no longer
 // existed. PICTURE_KEYS is now the one list all three read; this checks nothing has drifted from it again.
 test('every picture the question builder makes is in the one list', () => {

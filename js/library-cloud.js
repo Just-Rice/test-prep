@@ -121,7 +121,7 @@ export async function saveInviteCode(code) {
 }
 
 export async function savePersonalLink(id, passcode) {
-  if (plainCode(passcode).length < MIN_PERSONAL_CODE) throw new Error(`The passcode needs at least ${MIN_PERSONAL_CODE} letters or numbers.`);
+  if (plainCode(passcode).length < MIN_PERSONAL_CODE) throw new Error(`The password needs at least ${MIN_PERSONAL_CODE} letters or numbers.`);
   await saveInvite({ personalId: plainCode(id), personal: plainCode(passcode) });
 }
 

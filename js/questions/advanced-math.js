@@ -40,7 +40,7 @@ export const ADVANCED_MATH_QUESTIONS = [
     'Look for two numbers that multiply to 12 and add to 7: 3 and 4. So the expression factors as (x + 3)(x + 4).'),
   mc('adv-06', EQV, 'Hard', 'For x ≠ 2, which expression is equivalent to (x² − 4)/(x − 2)?',
     ['x − 2', 'x + 2', 'x² − 2', '2'], 'B',
-    'The numerator factors as (x − 2)(x + 2). Cancelling the common factor of x − 2, which is allowed because x ≠ 2, leaves x + 2.'),
+    'The numerator factors as (x − 2)(x + 2). Canceling the common factor of x − 2, which is allowed because x ≠ 2, leaves x + 2.'),
   spr('adv-07', EQV, 'Medium', 'If 2(x + 3) + 4x = 6x + k for every value of x, what is the value of k?', ['6'],
     'The left side expands to 2x + 6 + 4x = 6x + 6. For the two sides to match for every x, the constant terms must be equal, so k = 6.'),
   mc('adv-08', EQV, 'Medium', 'Which expression is equivalent to 4x² − 12x + 9?',
@@ -163,7 +163,7 @@ export const ADVANCED_MATH_QUESTIONS = [
   mc('adv-49', NLF, 'Hard', 'What is the equation of the axis of symmetry of the graph of y = (x + 1)(x − 5)?',
     ['x = −2', 'x = 1', 'x = 2', 'x = 3'], 'C',
     'The x-intercepts are at x = −1 and x = 5, and the axis of symmetry lies exactly halfway between them: (−1 + 5)/2 = 2.'),
-  mc('adv-50', NLF, 'Medium', 'The value of a machine after x years is modelled by f(x) = 500(0.8)ˣ dollars. What was the value of the machine when it was new?',
+  mc('adv-50', NLF, 'Medium', 'The value of a machine after x years is modeled by f(x) = 500(0.8)ˣ dollars. What was the value of the machine when it was new?',
     ['0', '0.8', '400', '500'], 'D',
     'A machine is new when x = 0, and (0.8)⁰ = 1, so f(0) = 500. Choice C is the value after one year.'),
 ];
