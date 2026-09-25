@@ -93,7 +93,10 @@ function restoreTest() {
     eliminated: Object.fromEntries(Object.entries(saved.eliminated).map(([id, list]) => [id, new Set(list)])),
     gridOpen: false, highlightMode: false,
   };
-  toast('Your timed test was restored. Its timer kept running while the page was closed.');
+  // Said once per tab: reloading, or opening another test's pages, isn't news.
+  let told = false;
+  try { told = sessionStorage.getItem(TEST_KEY) === 'told'; sessionStorage.setItem(TEST_KEY, 'told'); } catch { /* storage unavailable */ }
+  if (!told) toast(`Your ${EXAMS[test.exam]?.name ?? ''} timed test is still going. Its timer kept running while the page was closed.`);
 }
 // Where the student is in a question (time spent, highlights) is otherwise saved only on moving on, so it is
 // saved as the page goes away too.
@@ -988,6 +991,7 @@ function renderDrill(headerHtml, source, rerender) {
     st.correct = record(q, st.selected, source, st.took, correct, { guessed: st.guessing });
     session.done++;
     if (st.correct) session.correct++;
+    renderNav(currentRoute);   // today's count, the streak and the Review badge move with every answer
   };
 
   if (!st.revealed) {
@@ -1055,7 +1059,7 @@ function viewStart() {
     <div class="cards">
       <div class="card">
         <h2>Take the placement test</h2>
-        <p>About ${PLACEMENT.minItems}–${PLACEMENT.maxItems} questions in each of ${placementSections.map(s => s.name).join(', ')}. Questions get harder or easier as you answer, and you'll get an estimated score range and a skill breakdown. Answers aren't shown during the test; any misses go to your Review list.</p>
+        <p>About ${PLACEMENT.minItems}–${PLACEMENT.maxItems} questions in ${placementSections.length > 1 ? `each of ${listNames(placementSections.map(s => s.name))}` : placementSections.map(s => s.name).join('')}. Questions get harder or easier as you answer, and you'll get an estimated score range and a skill breakdown. Answers aren't shown during the test; any misses go to your Review list.</p>
         <button class="primary" id="placement" ${pool.length ? '' : 'disabled'}>Start placement test</button>
       </div>
       <div class="card">
@@ -1115,6 +1119,7 @@ function viewPlacement(arg) {
   on('#submit', 'click', () => {
     const correct = record(q, st.selected, 'placement', Date.now() - st.shownAt);
     session.answered.push({ qid: q.id, domain: q.domain, b: DIFFICULTY_B[q.difficulty] ?? 0, correct });
+    renderNav(currentRoute);
     session.q = null;
     viewPlacement(section);
     window.scrollTo(0, 0);
@@ -1548,10 +1553,10 @@ function viewTest() {
     </div>
     ${short.length ? `<p class="note">A full-length test needs ${short.map(s => `${s.perModule * s.modules} ${s.name}`).join(', ')} questions that can be scored automatically. You have ${short.map(s => `${testableCount(s.id)} ${s.name}`).join(', ')}, so sections will be shorter until you add more.</p>` : ''}
     ${progress.tests.length ? `<div class="card"><h2>Past tests</h2><div class="table-wrap"><table class="stack">
-      <thead><tr><th>Date</th><th>Test</th>${scored.map(s => `<th>${s.name}</th>`).join('')}<th>${totalLabel()}</th></tr></thead>
+      <thead><tr><th>Date</th><th>Test</th>${scored.map(s => `<th>${s.name}</th>`).join('')}<th>${exam.total.label ?? 'Total'}</th></tr></thead>
       <tbody>${testHistory().reverse().map(t => `<tr><td>${new Date(takenAt(t)).toLocaleDateString()}</td><td data-label="Test">${esc(t.kind)}${t.timeFactor ? ` <span class="muted">· ${TIME_NAMES[t.timeFactor] ?? 'extended time'}</span>` : ''}</td>
         ${scored.map(s => `<td data-label="${s.name}">${t.summary[s.id] ? `${t.summary[s.id].score.mid}${t.summary[s.id].total ? ` <span class="muted">(${t.summary[s.id].correct}/${t.summary[s.id].total})</span>` : ''}` : '—'}</td>`).join('')}
-        <td data-label="${totalLabel()}">${t.total ? t.total.mid : '—'}</td></tr>`).join('')}</tbody>
+        <td data-label="${exam.total.label ?? 'Total'}">${t.total ? t.total.mid : '—'}</td></tr>`).join('')}</tbody>
     </table></div></div>` : ''}`;
   on('[data-test]', 'click', e => startTest(e.currentTarget.dataset.test));
 }
@@ -1702,7 +1707,7 @@ function drawQuestion() {
     ${questionHtml(q, { selected: s.answers[q.id], eliminated, tools: true, hideMeta: true, passageHtml: s.highlights[q.id] })}
     <div class="test-foot">
       <button id="prev" ${s.idx === 0 ? 'disabled' : ''}>Back</button>
-      <button class="ghost" id="grid-toggle">Question ${s.idx + 1} of ${s.questions.length} ${s.gridOpen ? '▾' : '▴'}</button>
+      <button class="ghost" id="grid-toggle" aria-expanded="${Boolean(s.gridOpen)}">Question ${s.idx + 1} of ${s.questions.length} ${s.gridOpen ? '▴' : '▾'}</button>
       <button class="primary" id="next">${last ? `Review ${unit}` : 'Next'}</button>
     </div>
     ${s.gridOpen ? gridHtml() : ''}`;
@@ -2011,7 +2016,7 @@ function skillsTableHtml() {
         <tbody>${rows.length ? rows.map(r => `<tr>
           <td>${esc(skillLabel(r.name))}</td>
           ${showSection ? `<td data-label="Section">${esc(r.sectionShort)}</td>` : ''}
-          <td data-label="Mastery">${r.mastery == null ? '<span class="muted">not started</span>' : `<span class="mastery"><span class="track"><span class="fill ${masteryClass(r.mastery)}" style="width:${Math.round(r.mastery * 100)}%"></span></span><span class="pct">${Math.round(r.mastery * 100)}%</span></span>`}</td>
+          <td data-label="Mastery">${r.mastery == null ? '<span class="muted nowrap">not started</span>' : `<span class="mastery"><span class="track"><span class="fill ${masteryClass(r.mastery)}" style="width:${Math.round(r.mastery * 100)}%"></span></span><span class="pct">${Math.round(r.mastery * 100)}%</span></span>`}</td>
           <td class="num" data-label="Accuracy">${r.accuracy == null ? '—' : `${Math.round(r.accuracy * 100)}%`}</td>
           <td class="num" data-label="Answered">${r.answered}</td>
           <td class="num"><button type="button" class="small" data-skill="${esc(r.name)}" data-section="${r.section}" aria-label="Practice ${esc(skillLabel(r.name))}">Practice</button></td>
@@ -2046,6 +2051,7 @@ function railHtml(days) {
   const total = projectedTotal();
   const target = progress.plan.target;
   const queue = Object.entries(progress.mistakes).filter(([id, m]) => byId.has(id) && !m.graduated && !m.removed).sort((a, b) => a[1].due - b[1].due).slice(0, 3);
+  const cardsDue = cardsWaiting().due.length;
   const dueLabel = at => (at <= Date.now() ? 'now' : new Date(at).toLocaleDateString(undefined, { weekday: 'short' }));
   const testDay = progress.plan.testDate && new Date(`${progress.plan.testDate}T00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   return `
@@ -2067,7 +2073,8 @@ function railHtml(days) {
     <section class="rail-card">
       <h2 class="rail-label">Review queue</h2>
       ${queue.length ? `<ul class="queue">${queue.map(([id, m]) => `<li><span>${esc(skillLabel(byId.get(id).skill))}</span><span>${dueLabel(m.due)}</span></li>`).join('')}</ul>`
-        : '<p class="hint">Nothing to review. Questions you miss land here.</p>'}
+        : cardsDue ? '' : '<p class="hint">Nothing to review. Questions you miss land here.</p>'}
+      ${cardsDue ? `<p class="hint"><a href="#/cards">${plural(cardsDue, 'flashcard')} due</a></p>` : ''}
     </section>
     <section class="rail-card">
       <h2 class="rail-label">Test day</h2>

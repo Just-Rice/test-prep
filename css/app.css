@@ -926,3 +926,11 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 .flash-term { margin: 0; font-size: calc(clamp(24px, 4vw, 32px) * var(--text-scale)); font-weight: 800; }
 .flash-meaning { margin: 4px 0 0; max-width: 52ch; font-size: calc(18px * var(--text-scale)); line-height: 1.5; }
 .flashcard .hint { margin: 0; }
+
+/* On a narrow screen a revealed answer's "Correct answer" or "Your answer" goes under its text, rather than squeezing
+   the text into a column a few words wide. */
+@container (max-width: 560px) {
+  .choice-btn:has(.tag) { flex-wrap: wrap; row-gap: 4px; }
+  .choice-btn:has(.tag) > span:not(.letter):not(.tag) { flex: 1 1 0; min-width: 0; }
+  .choice-btn .tag { flex-basis: 100%; margin-left: 42px; padding-left: 0; }
+}
