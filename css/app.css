@@ -969,7 +969,7 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 
 /* ---------- the sidebar's running-test line ---------- */
 .side-nav .label.has-sub { display: grid; line-height: 1.2; }
-.nav-sub { font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.nav-sub { font-size: 12px; font-weight: 600; color: var(--accent); white-space: normal; }
 .shell:not(.collapsed) .side-nav .badge.live { display: none; }
 
 /* ---------- first visit ---------- */

@@ -814,7 +814,7 @@ function testStatus() {
   if (!test || test.finished) return '';
   const which = test.exam === examId ? 'In progress' : `${EXAMS[test.exam].name} test in progress`;
   if (test.onBreak) return `${which} · on a break`;
-  return `${which} · ${Math.max(0, Math.ceil((test.endsAt - Date.now()) / 60000))} min left`;
+  return `${which} · ${Math.max(0, Math.ceil((test.endsAt - Date.now()) / 60000))}\u00a0min\u00a0left`;   // kept together when it wraps
 }
 // Kept up to date while the test runs, wherever the student is in the app.
 function updateTestStatus() {
