@@ -27,9 +27,13 @@ export function prior(progress, section, exam = EXAMS.sat) {
   return { mean: 0, sd: 1 };
 }
 
+// A right answer the student said was a guess shows luck rather than skill, so it doesn't raise their estimate. A
+// wrong one still counts: it shows the question was beyond them.
+export const showsAbility = r => !(r.guessed && r.correct);
+
 export function sectionAbility(progress, section, exam = EXAMS.sat) {
   // Placement results are already folded into the prior, so only later responses update it.
-  const rs = progress.responses.filter(r => r.section === section && r.source !== 'placement');
+  const rs = progress.responses.filter(r => r.section === section && r.source !== 'placement' && showsAbility(r));
   return estimateAbility(rs, prior(progress, section, exam));
 }
 
@@ -37,7 +41,7 @@ export function skillAbilities(progress, section, exam = EXAMS.sat) {
   const overall = sectionAbility(progress, section, exam);
   return skillsOf(exam, section).map(skill => {
     const rs = progress.responses.filter(r => r.section === section && r.skill === skill.name);
-    const est = estimateAbility(rs, { mean: overall.theta, sd: 0.8 });
+    const est = estimateAbility(rs.filter(showsAbility), { mean: overall.theta, sd: 0.8 });
     return { ...skill, ...est, answered: rs.length, correct: rs.filter(r => r.correct).length };
   });
 }

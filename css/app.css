@@ -832,7 +832,10 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 
 /* ---------- settings ---------- */
 .settings-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); align-items: start; }
-.setting h2 { margin-bottom: 2px; }
+.setting h3 { font-size: calc(19px * var(--text-scale)); font-weight: 700; line-height: 1.25; margin-bottom: 2px; }
+/* Settings are grouped: Appearance, Accessibility, Study. */
+#view > .settings-heading { margin-top: 28px; margin-bottom: -6px; }
+.settings-heading { font-size: calc(13px * var(--text-scale)); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .swatches { display: grid; gap: 8px; margin-top: 12px; }
 .swatch { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 1px 12px; width: 100%; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--rule); background: var(--surface); color: var(--ink); text-align: left; }
 .swatch:hover:not(:disabled) { border-color: var(--muted); }
@@ -883,3 +886,41 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 .own-key-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .own-key-form label { flex-basis: 100%; font-weight: 600; font-size: 14px; }
 .own-key-form input { flex: 1 1 260px; min-width: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+/* Shown when the app is opened inside another page, such as an about:blank tab (see frameNoteHtml). */
+.frame-note { display: grid; gap: 8px; border: 1px solid var(--rule); }
+.frame-note p { margin: 0; max-width: 78ch; color: var(--ink); }
+.frame-note .actions { margin: 0; }
+
+/* The admin's invite links: the link itself, and a button to copy it. */
+.link-row { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin-top: 8px; }
+.link-row input { flex: 1 1 18rem; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+/* Pacing: typical time a question against test-day pace, which sits at the middle of each bar. */
+.pace-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 10px; }
+.pace-list li { display: grid; grid-template-columns: minmax(5.5rem, 9rem) minmax(60px, 1fr) auto auto; align-items: center; gap: 6px 14px; }
+.pace-list .name { font-weight: 600; }
+.pace-track { position: relative; height: 8px; border-radius: 999px; background: var(--surface-2); }
+.pace-fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--ink); }
+.pace-fill.high { background: var(--good); }
+.pace-fill.mid { background: var(--mid); }
+.pace-fill.low { background: var(--low); }
+.pace-mark { position: absolute; left: calc(50% - 1px); top: -4px; bottom: -4px; width: 2px; border-radius: 1px; background: var(--ink); }
+.pace-num { font-variant-numeric: tabular-nums; font-weight: 700; }
+.pace-num small { font-weight: 400; color: var(--muted); }
+.pacing h3 { margin: 16px 0 2px; }
+@media (max-width: 560px) { .pace-list li { grid-template-columns: minmax(0, 1fr) auto auto; } .pace-track { grid-column: 1 / -1; grid-row: 2; } }
+.pace-note { margin: 0; font-size: calc(14px * var(--text-scale)); color: var(--muted); font-variant-numeric: tabular-nums; }
+.pace-note.low { color: var(--low); }
+.pace-note.mid { color: var(--mid); }
+.feedback .guess-note { margin: 6px 0 0; }
+.official-form input[type=date] { width: 150px; }
+.official-form label small { font-weight: 400; }
+.official td .link { color: var(--low); }
+
+/* Flashcards: one term at a time, its meaning shown on request. */
+.flashcard { display: grid; gap: 8px; justify-items: center; text-align: center; padding: clamp(28px, 6vw, 56px) 20px; }
+.flashcard .eyebrow { margin: 0; }
+.flash-term { margin: 0; font-size: calc(clamp(24px, 4vw, 32px) * var(--text-scale)); font-weight: 800; }
+.flash-meaning { margin: 4px 0 0; max-width: 52ch; font-size: calc(18px * var(--text-scale)); line-height: 1.5; }
+.flashcard .hint { margin: 0; }

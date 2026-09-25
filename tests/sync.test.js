@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultProgress } from '../js/store.js';
-import { mergeProgress, periodOf, fromCloud, syncProgress, takeBack, toCloud } from '../js/sync-core.js';
-import { addMistake, dueMistakes, reviewMistake } from '../js/srs.js';
+import { mergeProgress, periodOf, fromCloud, removeTest, syncProgress, takeBack, toCloud } from '../js/sync-core.js';
+import { addMistake, dueMistakes, rateCard, reviewMistake } from '../js/srs.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const T0 = Date.UTC(2026, 8, 3, 12);
@@ -131,6 +131,43 @@ test('missing a question again after taking the miss back puts it back in review
 test('progress with nothing taken back is stored exactly as before', () => {
   const p = { ...defaultProgress(), responses: [answer('q1', T0)] };
   assert.ok(!JSON.parse(toCloud(p).main).removed);
+  assert.ok(!('cards' in JSON.parse(toCloud(p).main)), 'nor does a test without flashcards gain a cards field');
+});
+
+test('a test removed from the history stays gone, even from a device that still has it', async () => {
+  const cloud = memoryCloud();
+  const knownA = {};
+  const knownB = {};
+  const official = { id: 'official-1', at: T0, takenAt: T0 - DAY, official: true, kind: 'Bluebook practice test', summary: {}, total: { low: 1350, mid: 1350, high: 1350 }, qids: [] };
+  let a = await syncProgress(cloud.backend, { ...defaultProgress(), tests: [official] }, knownA, { full: true });
+  let b = await syncProgress(cloud.backend, defaultProgress(), knownB, { full: true });
+  assert.equal(b.tests.length, 1, 'the other device has the test too');
+
+  a = await syncProgress(cloud.backend, removeTest(a, 'official-1'), knownA);
+  assert.deepEqual(a.tests, []);
+  // Device B still holds the test and pushes something else on top of it.
+  b = await syncProgress(cloud.backend, { ...b, responses: [answer('q1', T0 + DAY)] }, knownB);
+  assert.deepEqual(b.tests, [], 'the removal reaches the device that still had it');
+  a = await syncProgress(cloud.backend, a, knownA, { full: true });
+  sameData(a, b);
+  assert.equal(removeTest(a, 'nothing-here').tests.length, 0);
+});
+
+test('flashcards keep the most recent rating from any device, and a reset clears them', () => {
+  const a = defaultProgress();
+  const b = defaultProgress();
+  rateCard(a.cards, '4a:torque', 'knew', T0);
+  rateCard(b.cards, '4a:torque', 'knew', T0);
+  rateCard(b.cards, '4a:torque', 'missed', T0 + DAY);
+  rateCard(a.cards, '4a:work', 'knew', T0 + 2 * DAY);
+  const merged = mergeProgress(a, b);
+  assert.equal(merged.cards['4a:torque'].box, 0, 'the later miss wins');
+  assert.equal(merged.cards['4a:work'].box, 1);
+  sameData(merged, mergeProgress(b, a));
+  assert.deepEqual(JSON.parse(toCloud(merged).main).cards, merged.cards, 'cards travel with the main document');
+  assert.deepEqual(fromCloud(toCloud(merged).main, {}).cards, merged.cards);
+  const reset = mergeProgress(merged, { ...defaultProgress(), resetAt: T0 + 3 * DAY });
+  assert.deepEqual(reset.cards, {});
 });
 
 test('answers are stored in half-month chunks and survive a round trip', () => {

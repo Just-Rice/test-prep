@@ -65,40 +65,58 @@ export async function libraryAccess(uid) {
   return null;
 }
 
-// ---------- the invite code ----------
+// ---------- invite codes and links ----------
 //
-// Testers can join with a code instead of being added by hand. The admin chooses it; it is kept at
-// settings/invite, which only an admin may read, and firestore.rules compares what a tester types against
-// it before letting them onto the testers/ list, so the code never has to be sent to anyone's browser to be
-// checked. Codes are compared without case, spaces or dashes, so "K7M2-X9QP" and "k7m2x9qp" are the same.
+// Testers can join with a code instead of being added by hand. There are two, both chosen by the admin and kept
+// at settings/invite, which only an admin may read; firestore.rules compares what a device sends against them
+// before letting it onto the testers/ list, so neither code has to be sent to anyone's browser to be checked.
+//
+//   code       the tester code, sent as a link (#/invite/<code>). It works only for someone signed in with an
+//              account, so every tester has one and their progress follows them.
+//   personal   the owner's personal link (#/personal/<code>), for their own devices and for testing. It works
+//              without an account: the device signs in as a guest (see signInAsGuest in sync.js) and joins.
+//              Anyone holding it gets in, so it is longer and kept to the owner.
+//
+// Codes are compared without case, spaces or dashes, so "K7M2-X9QP" and "k7m2x9qp" are the same.
 
 export const MIN_CODE = 8;
+export const MIN_PERSONAL_CODE = 12;
 export const plainCode = code => String(code ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-export async function joinWithCode(uid, code, name) {
+// link: joined by opening a link, so a refusal means the link rather than something typed.
+export async function joinWithCode(uid, code, name, { link = false } = {}) {
   const { doc, setDoc } = fb.firestore;
   try {
     await setDoc(doc(fb.db, 'testers', uid), { code: plainCode(code), name: String(name || '').slice(0, 80), joinedAt: new Date().toISOString() });
   } catch (err) {
     // The rules refuse a wrong code the same way as any other refusal.
-    if (err?.code === 'permission-denied') throw new Error('That invite code isn’t right. Check it with whoever gave it to you and try again.');
+    if (err?.code === 'permission-denied') {
+      throw new Error(link
+        ? 'This link doesn’t work any more: it may have been changed. Ask whoever sent it for the current one.'
+        : 'That invite code isn’t right. Check it with whoever gave it to you and try again.');
+    }
     throw new Error('Could not join just now. Check your connection and try again.');
   }
 }
 
-export async function readInviteCode() {
+export async function readInviteCodes() {
   const { doc, getDoc } = fb.firestore;
   const snap = await getDoc(doc(fb.db, 'settings', 'invite'));
-  return snap.exists() ? snap.data().code : null;
+  const data = snap.exists() ? snap.data() : {};
+  return { code: data.code || null, personal: data.personal || null };
 }
 
-export async function saveInviteCode(code) {
+// Each code is saved on its own; changing one leaves the other as it was.
+async function saveCode(field, code, minimum) {
   const plain = plainCode(code);
-  if (plain.length < MIN_CODE) throw new Error(`An invite code needs at least ${MIN_CODE} letters or numbers, so it can’t be guessed.`);
+  if (plain.length < minimum) throw new Error(`It needs at least ${minimum} letters or numbers, so it can’t be guessed.`);
   const { doc, setDoc } = fb.firestore;
-  await setDoc(doc(fb.db, 'settings', 'invite'), { code: plain, changedAt: new Date().toISOString() });
+  await setDoc(doc(fb.db, 'settings', 'invite'), { [field]: plain, changedAt: new Date().toISOString() }, { merge: true });
   return plain;
 }
+
+export const saveInviteCode = code => saveCode('code', code, MIN_CODE);
+export const savePersonalCode = code => saveCode('personal', code, MIN_PERSONAL_CODE);
 
 export async function listTesters() {
   const { collection, getDocs } = fb.firestore;

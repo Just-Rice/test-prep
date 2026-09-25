@@ -72,7 +72,7 @@
       var view = document.getElementById('view');
       if (!view || !view.hasAttribute('data-loading')) return;
       view.removeAttribute('data-loading');
-      view.innerHTML = '<div class="empty"><h2>SAT Prep didn\u2019t load</h2><p>Reload the page to try again.</p>'
+      view.innerHTML = '<div class="empty"><h2>Test Prep didn\u2019t load</h2><p>Reload the page to try again.</p>'
         + '<div class="actions"><button class="primary" type="button" onclick="location.reload()">Reload</button></div></div>';
     }
     window.addEventListener('error', showLoadError);

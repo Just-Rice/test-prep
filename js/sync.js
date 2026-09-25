@@ -36,7 +36,8 @@ let stopListening = null;
 const state = { phase: syncConfigured ? 'loading' : 'off', message: null, lastSynced: null };
 
 // phase: 'off' (not configured) | 'loading' | 'signed-out' | 'syncing' | 'synced' | 'error'
-export const syncState = () => ({ ...state, account: accountName(), uid: user?.uid ?? null });
+// guest: signed in by the owner's personal link rather than with an account (see signInAsGuest).
+export const syncState = () => ({ ...state, account: accountName(), uid: user?.uid ?? null, guest: Boolean(user?.isAnonymous) });
 
 function update(patch) {
   Object.assign(state, patch);
@@ -248,6 +249,14 @@ export async function signInWithUsername(username, passcode, { create = false } 
   await authAction(() => action(fb.authInstance, email, passcode));
 }
 
+// The owner's personal link gives a device the shared library without an account. Firebase's anonymous sign-in
+// stands in for one: the device gets an account of its own, with no name or passcode, which then joins the tester
+// list with the link's code. It lasts until this browser's site data is cleared or it signs out.
+export async function signInAsGuest() {
+  if (!fb) throw new Error('Still connecting. Try the link again in a moment.');
+  await authAction(() => fb.auth.signInAnonymously(fb.authInstance));
+}
+
 export async function signOutOfSync() {
   // Upload anything still waiting before the account is disconnected.
   if (pushTimer) flushPush();
@@ -257,6 +266,7 @@ export async function signOutOfSync() {
 
 function accountName() {
   if (!user) return null;
+  if (user.isAnonymous) return 'Personal link';
   const email = user.email || '';
   if (email.endsWith(`@${USERNAME_DOMAIN}`)) return email.slice(0, -(USERNAME_DOMAIN.length + 1));
   return user.displayName || email || 'your account';
@@ -285,6 +295,7 @@ const MESSAGES = {
   'auth/network-request-failed': 'Could not reach the sign-in service. Check your internet connection.',
   'auth/unauthorized-domain': "This site's address isn't on the Firebase project's list of authorized domains.",
   'auth/operation-not-allowed': "That sign-in method isn't turned on in the Firebase project.",
+  'auth/admin-restricted-operation': "That sign-in method isn't turned on in the Firebase project.",
   'auth/api-key-not-valid.-please-pass-a-valid-api-key.': "The Firebase settings in js/firebase-config.js aren't valid.",
   'auth/invalid-api-key': "The Firebase settings in js/firebase-config.js aren't valid.",
   'permission-denied': 'The cloud database refused access. Check the Firestore security rules.',

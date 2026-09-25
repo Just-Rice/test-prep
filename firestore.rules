@@ -14,11 +14,14 @@ rules_version = '2';
 //
 // No client can ever write to admins/, so an admin can only be made by hand in the Firebase console.
 //
-// A tester can be added the same way, by hand, or can join with the invite code. The admin chooses the code
-// in the app; it is kept at settings/invite, which only an admin may read. A signed-in account joins by
-// creating its own testers/ entry holding the code, and the rule below compares that against
-// settings/invite itself, so the code is never sent to anyone's browser to be checked. Without the code,
-// signing up still gives no access. Changing the code stops new people joining; it does not remove anyone.
+// A tester can be added the same way, by hand, or can join with a code. The admin chooses two in the app, both
+// kept at settings/invite, which only an admin may read:
+//   code       the tester link's code. Only someone signed in with a real account can join with it.
+//   personal   the admin's personal link, for their own devices. It also works for a guest: a device signed in
+//              anonymously, with no account, which is how the link works without signing in.
+// A device joins by creating its own testers/ entry holding a code, and the rule below compares that against
+// settings/invite itself, so neither code is ever sent to anyone's browser to be checked. Without one, signing
+// up still gives no access. Changing a code stops new people joining with it; it does not remove anyone.
 //
 // To set this up the first time: Firebase console -> Authentication, copy your own User UID, then in
 // Firestore create a document at admins/<your-uid> (any contents, an empty document is fine). Then choose
@@ -35,6 +38,15 @@ service cloud.firestore {
     }
     function mayReadLibrary() {
       return isAdmin() || (signedIn() && exists(/databases/$(database)/documents/testers/$(request.auth.uid)));
+    }
+    // Signed in with an account (Google, or a username and passcode), rather than as a personal-link guest.
+    function hasAccount() {
+      return request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+    // Whether a code someone joins with is one of the two the admin chose.
+    function joinsWith(code) {
+      let invite = get(/databases/$(database)/documents/settings/invite).data;
+      return (code == invite.get('code', '') && hasAccount()) || code == invite.get('personal', '');
     }
 
     // A student's own progress. Only the documents the app writes are allowed, each a single "json" string of
@@ -96,8 +108,8 @@ service cloud.firestore {
     }
     match /testers/{uid} {
       allow read: if (signedIn() && request.auth.uid == uid) || isAdmin();
-      // Joining with the invite code: only for one's own account, only by creating the entry (so an entry
-      // can never be changed afterwards), only with the current code, and only the fields the app writes.
+      // Joining with a code: only for one's own account, only by creating the entry (so an entry can never be
+      // changed afterwards), only with a current code, and only the fields the app writes.
       allow create: if signedIn() && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['code', 'name', 'joinedAt'])
         && request.resource.data.name is string && request.resource.data.name.size() <= 80
@@ -105,11 +117,11 @@ service cloud.firestore {
         && request.resource.data.code is string
         && request.resource.data.code.size() >= 8
         && exists(/databases/$(database)/documents/settings/invite)
-        && request.resource.data.code == get(/databases/$(database)/documents/settings/invite).data.code;
+        && joinsWith(request.resource.data.code);
       allow delete: if isAdmin();
     }
 
-    // The invite code itself: only an admin may see it or change it.
+    // The codes themselves: only an admin may see or change them.
     match /settings/invite {
       allow read, write: if isAdmin();
     }

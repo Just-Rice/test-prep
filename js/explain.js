@@ -15,6 +15,7 @@
 
 import { FIREBASE_CONFIG, RECAPTCHA_SITE_KEY } from './firebase-config.js';
 import { pictureUrl } from './library-cloud.js';
+import { hasPicture as isImportedPicture, importedPictureUrl } from './imported-library.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
 const MODEL = 'gemini-3.8-flash';   // free tier on the Gemini Developer API
@@ -117,10 +118,18 @@ async function getModel() {
 }
 
 // Pictures are fetched and inlined as base64. A library built on this device keeps them as files under
-// data/img; the shared library names each one by id and fetches it on demand, so both have to be handled,
-// or Gemini is sent a maths question without the picture that is the question.
+// data/img; the shared library and a student's own imported PDFs name each one by id instead, kept in the cloud or
+// on this device, so all three have to be handled, or Gemini is sent a maths question without the picture that is
+// the question.
+async function pictureSource(image) {
+  if (image?.src) return image.src;
+  if (!image?.id) return null;
+  const find = isImportedPicture(image.id) ? importedPictureUrl : pictureUrl;
+  return find(image.id).catch(() => null);
+}
+
 async function imagePart(image) {
-  const src = image?.src ?? (image?.id ? await pictureUrl(image.id).catch(() => null) : null);
+  const src = await pictureSource(image);
   if (!src) return null;
   try {
     const res = await fetch(src);

@@ -4,7 +4,8 @@ import {
   buildModule, isCorrect, nextPlacementQuestion, nextPracticeQuestion, PLACEMENT, routeFor, sectionAbility, skillAbilities,
 } from './adaptive.js';
 import { EXAMS, EXAM_IDS, NATIONAL_MERIT, examsOfQuestion, scoredSections, sectionOf, selectionIndex, skillsOf, totalScore } from './exams.js';
-import { addMistake, dueMistakes, reviewMistake } from './srs.js';
+import { addMistake, dueCards, dueMistakes, markGuessed, newCards, rateCard, reviewMistake } from './srs.js';
+import { removeTest } from './sync-core.js';
 import { applySettings, CHOICES, loadSettings, saveSettings } from './settings.js';
 import { answeredBefore, checkOwnKey, explainConfigured, explainKey, explainQuestion, hintFor, hintKey, keyAfterSignIn, ownKey, ownKeyAccount, setOwnKey } from './explain.js';
 import { DEMO_QUESTIONS } from './demo-questions.js';
@@ -13,11 +14,12 @@ import { MCAT_CP_LESSONS } from './lessons/mcat-cp.js';
 import { mountCalculator } from './calc.js';
 import { currentStreak, dayKey, longestStreak } from './streak.js';
 import {
-  initSync, readAccountKey, schedulePush, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState, writeAccountKey,
+  initSync, readAccountKey, schedulePush, signInAsGuest, signInWithGoogle, signInWithUsername, signOutOfSync, syncConfigured, syncState,
+  writeAccountKey,
 } from './sync.js';
 import {
-  joinWithCode, libraryAccess, listTesters, loadCloudQuestions, MIN_CODE, pictureUrl, plainCode, publishLibrary,
-  readInviteCode, removeTester, saveInviteCode,
+  joinWithCode, libraryAccess, listTesters, loadCloudQuestions, MIN_CODE, MIN_PERSONAL_CODE, pictureUrl, plainCode, publishLibrary,
+  readInviteCodes, removeTester, saveInviteCode, savePersonalCode,
 } from './library-cloud.js';
 import { decodeLibrary, pictureIds } from './library-bundle.js';
 import { importPdf } from './import-pdf.js';
@@ -71,6 +73,7 @@ function saveTest() {
       section: s.section, questions: s.questions.map(q => q.id), idx: s.idx, answers: s.answers, flags: [...s.flags],
       eliminated: Object.fromEntries(Object.entries(s.eliminated).map(([id, set]) => [id, [...set]])),
       highlights: s.highlights, times: s.times, reviewScreen: s.reviewScreen, onBreak: Boolean(s.onBreak), endsAt: s.endsAt,
+      timeFactor: s.timeFactor,
     }));
   } catch {
     // Storage full or turned off: the test carries on, it just can't survive a reload.
@@ -127,6 +130,10 @@ const plural = (n, word) => `${typeof n === 'number' ? n.toLocaleString() : n} $
 const sectionName = id => sectionOf(exam, id)?.name ?? id;
 const sectionShort = id => sectionOf(exam, id)?.short ?? id;
 const range = s => `${s.low}–${s.high}`;
+// When a test was taken. An official score logged afterwards carries the date it was taken as well as when it was
+// logged, which is what sync and resets go by.
+const takenAt = t => t.takenAt ?? t.at;
+const testHistory = () => [...progress.tests].sort((a, b) => takenAt(a) - takenAt(b));
 
 const save = () => {
   progressByExam[examId] = progress;
@@ -274,6 +281,26 @@ function clock(ms) {
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 }
 
+// ---------- pacing ----------
+//
+// Test-day pace is the time a section allows per question: 71 seconds in SAT Reading and Writing, 42 in ACT English,
+// about 97 on the MCAT, plus any extra time from Settings. An answer's time says something about pace unless the
+// question was skipped straight past (under three seconds) or left open while the student did something else (over
+// ten minutes). The typical time is the median, so one long pause doesn't swamp twenty quick answers.
+const paceMs = section => {
+  const s = sectionOf(exam, section);
+  return s ? ((s.minutes * 60 * 1000) / s.perModule) * timeFactor() : null;
+};
+const timedAnswer = r => r.ms >= 3000 && r.ms <= 10 * 60 * 1000 && r.source !== 'placement';
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+// How a typical time compares with the pace: within it, up to a quarter over, or further behind than that.
+const paceState = (typical, pace) => (typical <= pace ? ['high', 'On pace'] : typical <= pace * 1.25 ? ['mid', 'A little slow'] : ['low', 'Slow']);
+
 // A one-line title for a question in a list, which has to stay useful when fifty of them sit in a column.
 //
 // Most stems are boilerplate: 55 questions in the current library begin "Which choice completes the text so
@@ -343,11 +370,12 @@ new MutationObserver(changes => {
 const gradable = q => q.answer != null;
 const answerText = q => (Array.isArray(q.answer) ? q.answer.join(' or ') : q.answer);
 
-// A button that needs a second click within a few seconds, instead of a blocking confirm() dialog.
+// A button that needs a second click within a few seconds, instead of a blocking confirm() dialog. The action is
+// given the button, for a page with several of them.
 function confirmButton(sel, armedLabel, action) {
   on(sel, 'click', e => {
     const b = e.currentTarget;
-    if (b.dataset.armed) return action();
+    if (b.dataset.armed) return action(b);
     const original = b.textContent;
     b.dataset.armed = '1';
     b.textContent = armedLabel;
@@ -372,6 +400,43 @@ function toast(message) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
 }
 
+// ---------- opened inside another page ----------
+//
+// Test Prep can be opened inside another page, such as an about:blank tab that shows it in a frame. It works there,
+// but the browser gives a page shown that way its own separate saved data: progress, settings and sign-in from Test
+// Prep in a normal tab aren't there, and inside a bare about:blank tab whatever is saved is forgotten when the tab
+// closes. Signing in solves both, because progress then comes from the account, so the page says so until the
+// student signs in or dismisses it.
+const framed = (() => { try { return window.self !== window.top; } catch { return true; } })();
+// A frame whose outer page has no address of its own (a bare about:blank tab) keeps nothing once it closes.
+const framedInBlank = framed && [...(location.ancestorOrigins ?? [])].includes('null');
+const FRAME_NOTE_KEY = 'satprep.frameNote';
+let frameNoteDismissed = false;
+try { frameNoteDismissed = sessionStorage.getItem(FRAME_NOTE_KEY) === 'dismissed'; } catch { /* storage unavailable */ }
+
+function frameNoteHtml() {
+  if (!framed || frameNoteDismissed || (syncConfigured && syncState().account)) return '';
+  const normalTab = location.href.split('#')[0];
+  const kept = framedInBlank
+    ? 'Your progress from a normal tab isn’t here, and anything you do here is forgotten when this tab closes.'
+    : 'Your progress from a normal tab isn’t here, and what you do here won’t show up there.';
+  return `<div class="note frame-note" role="note">
+      <p><strong>${APP_NAME} is open inside another page</strong>, such as an about:blank tab. It works here, but your
+        browser keeps this page’s saved data separate. ${kept}${syncConfigured ? ' Sign in, and your progress comes from your account wherever you open it.' : ''}</p>
+      <div class="actions">
+        ${syncConfigured && currentRoute !== 'account' ? '<a class="button primary small" href="#/account">Sign in</a>' : ''}
+        <a class="button small" href="${esc(normalTab)}" target="_blank" rel="noopener">Open in a normal tab</a>
+        <button type="button" class="ghost small" data-frame-note-dismiss>Dismiss</button>
+      </div>
+    </div>`;
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('[data-frame-note-dismiss]')) return;
+  frameNoteDismissed = true;
+  try { sessionStorage.setItem(FRAME_NOTE_KEY, 'dismissed'); } catch { /* storage unavailable */ }
+  e.target.closest('.frame-note')?.remove();
+});
+
 // ---------- routing ----------
 
 const ROUTES = {
@@ -381,7 +446,11 @@ const ROUTES = {
   plan: [viewPlan, 'Study plan'], library: [viewLibrary, 'Library'], resources: [viewResources, 'Resources'],
   settings: [viewSettings, 'Settings'], account: [viewAccount, 'Account'], import: [viewImport, 'Your own questions'],
   learn: [viewLearn, 'Lessons'],
+  invite: [code => viewJoin('invite', code), 'Invitation'], personal: [code => viewJoin('personal', code), 'Personal link'],
+  cards: [viewCards, 'Flashcards'],
 };
+// The two links into the shared library (see "invite links" below).
+const JOIN_ROUTES = ['invite', 'personal'];
 
 // quiet: this redraw is not a reader's own navigation but the page catching up with something that
 // arrived on its own, so it appears without the entry animation. Replaying that animation over a page
@@ -398,7 +467,9 @@ function render({ quiet = false } = {}) {
   setMore(false);
   closePalette();
   if (!pool.length && ['practice', 'test', 'placement', 'placed'].includes(route)) return go('library');
-  if (!progress.profile.mode && !['library', 'resources', 'settings', 'start', 'placement', 'placed', 'account', 'learn'].includes(route)) return go('start');
+  // Pages that make sense before a level is chosen. Importing is one: a test with no questions can't be started,
+  // and the Get started page sends the student to import some.
+  if (!progress.profile.mode && !['library', 'resources', 'settings', 'start', 'placement', 'placed', 'account', 'learn', 'cards', 'import', ...JOIN_ROUTES].includes(route)) return go('start');
   if (session && !sessionBelongsTo(route)) session = null;
   document.title = `${ROUTES[route][1]} · ${exam.name} · ${APP_NAME}`;
   renderNav(route);
@@ -417,7 +488,7 @@ function quietly(draw) {
 }
 
 function sessionBelongsTo(route) {
-  return { placement: 'placement', practice: 'practice', review: 'review', mistakes: 'mistakes' }[route] === session.kind;
+  return { placement: 'placement', practice: 'practice', review: 'review', mistakes: 'mistakes', cards: 'cards' }[route] === session.kind;
 }
 
 const ICONS = {
@@ -460,7 +531,7 @@ function pageHead(title, { eyebrow = '', actions = '' } = {}) {
         <button type="button" class="jump" data-palette>${icon('search')}<span>Jump to…</span><kbd>⌘K</kbd></button>
         ${actions}
       </div>
-    </header>`;
+    </header>${frameNoteHtml()}`;
 }
 
 // Which test is being studied, at the top of the sidebar, since the pages below it depend on it: the MCAT has
@@ -516,7 +587,7 @@ document.addEventListener('keydown', e => {
 
 // The sidebar on wide screens; a top bar, bottom tabs and a "More" sheet on phones.
 function renderNav(active) {
-  const due = dueMistakes(progress.mistakes).filter(id => byId.has(id)).length;
+  const due = dueMistakes(progress.mistakes).filter(id => byId.has(id)).length + cardsWaiting().due.length;
   const today = answeredToday();
   const goal = progress.plan.dailyGoal;
   const testRunning = test && !test.finished;
@@ -711,7 +782,8 @@ function questionHtml(q, st = {}) {
     feedback = st.correct == null
       ? `<div class="feedback pending"><strong>Compare your answer.</strong> ${key}
           <div class="actions"><button class="primary" data-self="1">I got it right</button><button data-self="0">I got it wrong</button></div></div>`
-      : `<div class="feedback ${st.correct ? 'ok' : 'bad'}"><strong>${st.correct ? '✓ Correct.' : '✗ Not quite.'}</strong> ${key}
+      : `<div class="feedback ${st.correct ? 'ok' : 'bad'}"><strong>${st.correct ? (st.guessing ? '✓ Correct, but it was a guess.' : '✓ Correct.') : '✗ Not quite.'}</strong> ${key}
+          ${st.correct && st.guessing ? '<p class="guess-note">So it’s gone to Review, and comes back until you know it.</p>' : ''}
           ${rationale ? `<div class="rationale">${rationale}</div>` : ''}</div>`;
   }
   const original = st.revealed && q.original
@@ -748,14 +820,18 @@ function bindAnswerInputs(onChange, eliminated) {
   }
 }
 
-function record(q, choice, source, ms, selfMarked) {
+// guessed: the student marked the answer as a guess before checking it (see renderDrill).
+function record(q, choice, source, ms, selfMarked, { guessed = false } = {}) {
   const correct = selfMarked ?? isCorrect(q, choice);
   progress.responses.push({
     qid: q.id, section: q.section, domain: q.domain, skill: q.skill, b: DIFFICULTY_B[q.difficulty] ?? 0,
-    correct, choice: choice ?? null, ms, at: Date.now(), source,
+    correct, choice: choice ?? null, ms, at: Date.now(), source, ...(guessed ? { guessed: true } : {}),
   });
-  if (source === 'review') reviewMistake(progress.mistakes, q.id, correct);
+  // A lucky guess goes to review like a miss, since the student doesn't know it yet, without counting as one.
+  if (guessed && correct) markGuessed(progress.mistakes, q.id);
+  else if (source === 'review') reviewMistake(progress.mistakes, q.id, correct);
   else if (!correct) addMistake(progress.mistakes, q.id, progress.mistakes[q.id]?.reason ?? null);
+  if (guessed && !correct && progress.mistakes[q.id]) progress.mistakes[q.id].reason = 'Guessed';
   save();
   return correct;
 }
@@ -847,7 +923,7 @@ async function showAi(button, note, run, label) {
   }
 }
 
-const newDrillState = () => ({ selected: null, eliminated: new Set(), revealed: false, correct: null, shownAt: Date.now() });
+const newDrillState = () => ({ selected: null, eliminated: new Set(), revealed: false, correct: null, guessing: false, shownAt: Date.now() });
 
 // One-question-at-a-time flow with instant feedback, shared by practice and review.
 function renderDrill(headerHtml, source, rerender) {
@@ -856,9 +932,12 @@ function renderDrill(headerHtml, source, rerender) {
   view.innerHTML = `${headerHtml}
     ${questionHtml(q, { ...st, tools: !st.revealed })}
     ${st.correct === false ? reasonPicker(q.id) : ''}
+    ${st.correct != null && st.took && timedAnswer({ ms: st.took }) ? paceNote(q.section, st.took) : ''}
     <div class="actions">${awaitingSelfMark ? ''
       : st.revealed ? '<button class="primary" id="next">Next question</button>'
-      : `<button class="primary" id="check" ${st.selected == null ? 'disabled' : ''}>Check answer</button>`}
+      : `<button class="primary" id="check" ${st.selected == null ? 'disabled' : ''}>Check answer</button>
+        <button type="button" class="chip guess${st.guessing ? ' active' : ''}" id="guessing" aria-pressed="${st.guessing}"
+          title="Not sure? Mark it as a guess, and a lucky right answer still comes back in Review">I’m guessing</button>`}
       ${aiReady() && !st.revealed ? aiButton('Give me a hint', hintKey(q), 'id="hint"') : ''}
       ${aiNeedsSignIn() && !st.revealed ? '<a class="small hint-signin" href="#/account">Sign in for hints</a>' : ''}
       ${aiReady() && st.revealed && st.correct != null ? aiButton('Explain this', explainKey(q, st.selected), 'id="explain"') : ''}
@@ -872,13 +951,19 @@ function renderDrill(headerHtml, source, rerender) {
   }
 
   const finish = correct => {
-    st.correct = record(q, st.selected, source, Date.now() - st.shownAt, correct);
+    st.took = Date.now() - st.shownAt;
+    st.correct = record(q, st.selected, source, st.took, correct, { guessed: st.guessing });
     session.done++;
     if (st.correct) session.correct++;
   };
 
   if (!st.revealed) {
     bindAnswerInputs(v => { st.selected = v; $('#check').disabled = v == null; }, st.eliminated);
+    on('#guessing', 'click', e => {
+      st.guessing = !st.guessing;
+      e.currentTarget.classList.toggle('active', st.guessing);
+      e.currentTarget.setAttribute('aria-pressed', String(st.guessing));
+    });
     on('#check', 'click', () => {
       st.revealed = true;
       if (gradable(q)) finish();
@@ -891,6 +976,14 @@ function renderDrill(headerHtml, source, rerender) {
     on('#next', 'click', () => { session.q = null; rerender(); window.scrollTo(0, 0); });
     $('#next').focus({ preventScroll: true }); // keep the marked choices in view
   }
+}
+
+// How long a question took, beside the time test day allows for one.
+function paceNote(section, ms) {
+  const pace = paceMs(section);
+  if (!pace) return '';
+  const [state] = paceState(ms, pace);
+  return `<p class="pace-note ${state}">Took ${clock(ms)} · test day allows about ${clock(pace)} a question${timeFactor() > 1 ? `, with ${TIME_NAMES[timeFactor()]}` : ''}</p>`;
 }
 
 // ---------- start: placement or grade ----------
@@ -1124,6 +1217,7 @@ function viewReview(arg) {
           : '<p class="muted">Nothing yet.</p>'}
       </div>
     </div>
+    ${cardsHere().length ? flashcardsHtml() : ''}
     ${entries.length ? `<div class="card"><h2>Mistake log</h2><div class="table-wrap"><table class="stack">
       <thead><tr><th>Question</th><th>Skill</th><th>Difficulty</th><th>Reason</th><th>Next review</th></tr></thead>
       <tbody>${entries.map(([id, m]) => {
@@ -1131,6 +1225,7 @@ function viewReview(arg) {
         return `<tr><td>${esc(snippet(q))}</td><td data-label="Skill">${esc(skillLabel(q.skill))}</td><td data-label="Difficulty">${esc(q.difficulty ? levelName(q.difficulty) : '—')}</td><td data-label="Reason">${esc(m.reason || '—')}</td><td data-label="Next review">${m.due <= Date.now() ? 'Now' : new Date(m.due).toLocaleDateString()}</td></tr>`;
       }).join('')}</tbody></table></div></div>` : ''}`;
   on('#go', 'click', () => go('review/go'));
+  on('#study-cards', 'click', () => go('cards'));
 }
 
 function reviewSession() {
@@ -1152,6 +1247,98 @@ function reviewSession() {
   renderDrill(header, 'review', reviewSession);
 }
 
+// ---------- flashcards ----------
+//
+// Each lesson's key terms, one card each (see the flashcard notes in srs.js). The deck is the tests' lessons, in
+// order; a card's id is its lesson and term, so a card keeps its progress however the lessons are rearranged.
+const cardSlug = text => text.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+// Built the first time it is needed, since the lessons are defined further down this file.
+let decks = null;
+const cardsHere = () => (decks ??= Object.fromEntries(Object.entries(LESSONS).map(([id, lessons]) => [id,
+  lessons.flatMap(lesson => lesson.terms.map(([term, meaning]) => ({ id: `${lesson.id}:${cardSlug(term)}`, lesson, term, meaning })))])))[examId] ?? [];
+
+// What there is to study: cards due, and new ones. A lesson's own cards are all offered at once; the whole deck
+// brings in a few new ones a day.
+function cardsWaiting(lessonId = null) {
+  const ids = cardsHere().filter(c => !lessonId || c.lesson.id === lessonId).map(c => c.id);
+  const cards = progress.cards || {};
+  const today = dayKey(Date.now());
+  const startedToday = Object.values(cards).filter(c => dayKey(c.startedAt) === today).length;
+  return { due: dueCards(cards, ids), fresh: lessonId ? ids.filter(id => !cards[id]) : newCards(cards, ids, startedToday), total: ids.length };
+}
+
+function flashcardsHtml() {
+  const { due, fresh, total } = cardsWaiting();
+  const started = cardsHere().filter(c => progress.cards?.[c.id]).length;
+  const waiting = due.length + fresh.length;
+  return `<div class="card flash-summary">
+      <h2>Key-term flashcards</h2>
+      <p class="muted">${plural(total, 'card')}, one for each key term in the ${exam.name} lessons. ${started ? `${started} started` : 'None started yet'} · ${due.length} due · ${fresh.length} new today.</p>
+      <p class="hint">Say what a term means, then check. Cards you know come back after longer and longer gaps; the rest come back tomorrow.</p>
+      <div class="actions"><button class="primary" id="study-cards" ${waiting ? '' : 'disabled'}>${waiting ? `Study ${plural(waiting, 'card')}` : 'All done for today'}</button></div>
+    </div>`;
+}
+
+function viewCards(lessonId) {
+  const deck = new Map(cardsHere().map(c => [c.id, c]));
+  const lesson = lessonsHere().find(l => l.id === lessonId) ?? null;
+  const head = pageHead('Flashcards', { eyebrow: lesson ? `${exam.name} · ${esc(lesson.title)}` : exam.long });
+  if (!deck.size) {
+    view.innerHTML = `${head}<div class="empty"><h2>No ${exam.name} flashcards</h2><p>Flashcards come from the key terms in each lesson, and so far only the MCAT has lessons.</p><a class="button primary" href="#/review">Back to Review</a></div>`;
+    return;
+  }
+  if (session?.kind !== 'cards' || session.lesson !== (lesson?.id ?? null)) {
+    const { due, fresh } = cardsWaiting(lesson?.id);
+    session = { kind: 'cards', lesson: lesson?.id ?? null, queue: [...due, ...fresh], missed: new Set(), done: 0, knew: 0, flipped: false };
+  }
+  const id = session.queue[0];
+  if (!id) {
+    const { done, knew } = session;
+    session = null;
+    view.innerHTML = `${head}
+      <div class="empty celebrate"><h2>${done ? 'Cards done' : 'Nothing to study right now'}</h2>
+        <p>${done ? `${plural(done, 'card')}, ${knew} known first time. Cards you knew come back after a longer gap; the rest come back tomorrow.`
+          : 'No cards are due, and today’s new ones are done. More tomorrow.'}</p>
+        <div class="actions"><a class="button primary" href="#/review">Back to Review</a>${lesson ? `<a class="button" href="#/learn/${esc(lesson.id)}">Back to the lesson</a>` : ''}</div></div>`;
+    renderNav('review');
+    return;
+  }
+  const card = deck.get(id);
+  const isNew = !progress.cards?.[id];
+  view.innerHTML = `
+    <header class="bar"><div><div class="eyebrow">Flashcards · ${lesson ? esc(lesson.title) : exam.name}</div>
+      <strong>${plural(session.queue.length, 'card')} left</strong></div><span class="tally">${session.knew} of ${session.done} known first time</span></header>
+    <article class="card flashcard" aria-live="polite">
+      <p class="eyebrow">${esc(card.lesson.title)}${isNew ? ' · new' : ''}</p>
+      <h2 class="flash-term">${esc(card.term)}</h2>
+      ${session.flipped ? `<p class="flash-meaning">${esc(card.meaning)}</p>` : '<p class="hint">Say or think what it means, then check.</p>'}
+    </article>
+    <div class="actions">${session.flipped
+      ? '<button class="primary" id="knew">I knew it</button><button id="missed">Not yet</button>'
+      : '<button class="primary" id="flip">Show the meaning</button>'}</div>`;
+  const next = () => { session.flipped = false; viewCards(lessonId); };
+  on('#flip', 'click', () => { session.flipped = true; viewCards(lessonId); $('#knew')?.focus(); });
+  on('#knew', 'click', () => {
+    const firstTime = !session.missed.has(id);
+    rateCard(progress.cards ||= {}, id, firstTime ? 'knew' : 'relearned');
+    save();
+    session.queue.shift();
+    session.done++;
+    if (firstTime) session.knew++;
+    next();
+  });
+  on('#missed', 'click', () => {
+    rateCard(progress.cards ||= {}, id, 'missed');
+    save();
+    session.missed.add(id);
+    // It comes round again a few cards later, so it is practised before the session ends.
+    session.queue.shift();
+    session.queue.splice(Math.min(3, session.queue.length), 0, id);
+    next();
+  });
+  $(session.flipped ? '#knew' : '#flip')?.focus({ preventScroll: true });
+}
+
 // ---------- mistakes: everything you have ever missed ----------
 
 // Review is the spaced-repetition queue: it decides what to bring back and when. This is the collection behind
@@ -1161,7 +1348,8 @@ function reviewSession() {
 const MISTAKE_FILTERS = [['all', 'All'], ['due', 'Due now'], ['learning', 'Still learning'], ['graduated', 'Learned']];
 let mistakeView = { filter: 'all', section: 'all' };
 
-const lastMiss = qid => [...progress.responses].reverse().find(r => r.qid === qid && !r.correct) ?? null;
+// The answer that put a question in the log: the latest miss, or a right answer marked as a guess.
+const lastMiss = qid => [...progress.responses].reverse().find(r => r.qid === qid && (!r.correct || r.guessed)) ?? null;
 
 function mistakeEntries() {
   return Object.entries(progress.mistakes)
@@ -1193,7 +1381,7 @@ function viewMistakes(arg) {
       actions: `<button class="primary" id="drill" ${shown.length ? '' : 'disabled'}>Practice ${plural(Math.min(shown.length, 20), 'question')}</button>`,
     })}
     <div class="kpis">
-      <div class="kpi"><span class="eyebrow">Collected</span><strong>${all.length}</strong><span class="muted">${all.length === 1 ? 'question' : 'questions'} missed at least once</span></div>
+      <div class="kpi"><span class="eyebrow">Collected</span><strong>${all.length}</strong><span class="muted">${all.length === 1 ? 'question' : 'questions'} missed, or guessed right, at least once</span></div>
       <div class="kpi"><span class="eyebrow">Still learning</span><strong>${learning}</strong><span class="muted">${due ? `${due} due now` : 'nothing due right now'}</span></div>
       <div class="kpi"><span class="eyebrow">Learned</span><strong>${graduated}</strong><span class="muted">answered right five times running</span></div>
       <div class="kpi"><span class="eyebrow">Total misses</span><strong>${lapses}</strong><span class="muted">including repeats of the same question</span></div>
@@ -1202,7 +1390,7 @@ function viewMistakes(arg) {
       <div class="filter-bar">
         <div class="chips" role="group" aria-label="Show">${MISTAKE_FILTERS.map(([id, label]) =>
           `<button type="button" class="chip${mistakeView.filter === id ? ' active' : ''}" data-mfilter="${id}" aria-pressed="${mistakeView.filter === id}">${label}</button>`).join('')}</div>
-        ${sections.length > 1 ? `<div class="chips" role="group" aria-label="Section">${[['all', 'Both sections'], ...sections.map(s => [s.id, s.short])].map(([id, label]) =>
+        ${sections.length > 1 ? `<div class="chips" role="group" aria-label="Section">${[['all', sections.length > 2 ? 'All sections' : 'Both sections'], ...sections.map(s => [s.id, s.short])].map(([id, label]) =>
           `<button type="button" class="chip${mistakeView.section === id ? ' active' : ''}" data-msection="${id}" aria-pressed="${mistakeView.section === id}">${esc(label)}</button>`).join('')}</div>` : ''}
       </div>
       ${shown.length ? `<ol class="mistake-list">${shown.map(({ id, m, q }) => {
@@ -1220,7 +1408,7 @@ function viewMistakes(arg) {
               ${state}
             </summary>
             <div class="mistake-body" data-qid="${esc(id)}">
-              ${questionHtml(q, { selected: missed?.choice ?? null, revealed: true, correct: false, hideMeta: true })}
+              ${questionHtml(q, { selected: missed?.choice ?? null, revealed: true, correct: missed?.correct ?? false, guessing: Boolean(missed?.guessed), hideMeta: true })}
               ${reasonPicker(id)}
               <div class="actions"><button class="small" data-practice-skill="${esc(q.skill)}" data-practice-section="${q.section}">Practice this skill</button>${aiReady() ? aiButton('Explain this', explainKey(q, lastMiss(q.id)?.choice ?? null), 'data-explain') : ''}</div>
               ${aiNoteHtml()}
@@ -1249,7 +1437,7 @@ function viewMistakes(arg) {
     const q = byId.get(body.dataset.qid);
     const missed = lastMiss(body.dataset.qid);
     showAi(e.currentTarget, body.querySelector('.ai-note'),
-      () => explainQuestion(q, { chosen: missed?.choice ?? null, correct: false, examName: exam.name }), 'Explanation');
+      () => explainQuestion(q, { chosen: missed?.choice ?? null, correct: missed?.correct ?? false, examName: exam.name }), 'Explanation');
   });
   on('#drill', 'click', () => go('mistakes/go'));
 }
@@ -1285,7 +1473,10 @@ function mistakeDrill() {
 
 const testableCount = section => pool.filter(q => q.section === section && gradable(q)).length;
 const hours = minutes => (minutes >= 60 ? `${Math.floor(minutes / 60)} hr${minutes % 60 ? ` ${minutes % 60} min` : ''}` : `${minutes} min`);
-const sectionMinutes = list => list.reduce((sum, s) => sum + s.minutes * s.modules, 0);
+// A section's minutes with any extra time from Settings. A test keeps the extra time it started with, so changing the
+// setting halfway through one changes nothing until the next.
+const withTime = (minutes, factor = timeFactor()) => Math.round(minutes * factor);
+const sectionMinutes = (list, factor) => list.reduce((sum, s) => sum + withTime(s.minutes, factor) * s.modules, 0);
 
 function viewTest() {
   if (test && test.exam !== examId) {
@@ -1309,12 +1500,15 @@ function viewTest() {
     ...exam.sections.map(s => [s.id, s.name, s.modules > 1 ? 'Two modules' : `${s.perModule} questions${s.optional ? ' · optional' : ''}`, sectionMinutes([s]), [s]]),
   ];
   const intro = exam.adaptive
-    ? `Built like the digital ${exam.name}. Each section has two modules. Module 1 mixes easy, medium and hard questions, and how you do on it decides whether module 2 is harder or easier. ${exam.sections.map(s => `${s.name} modules are ${s.perModule} questions in ${s.minutes} minutes`).join('; ')}.`
-    : `Built like the ${exam.name}: each section is one timed block, in test-day order. ${exam.sections.map(s => `${s.name} is ${s.perModule} questions in ${s.minutes} minutes`).join('; ')}.${exam.sections.some(s => s.optional) ? ` ${exam.sections.filter(s => s.optional).map(s => s.name).join(' and ')} is optional and isn't part of the ${totalLabel()}.` : ''}`;
+    ? `Built like the digital ${exam.name}. Each section has two modules. Module 1 mixes easy, medium and hard questions, and how you do on it decides whether module 2 is harder or easier. ${exam.sections.map(s => `${s.name} modules are ${s.perModule} questions in ${withTime(s.minutes)} minutes`).join('; ')}.`
+    : `Built like the ${exam.name}: each section is one timed block, in test-day order. ${exam.sections.map(s => `${s.name} is ${s.perModule} questions in ${withTime(s.minutes)} minutes`).join('; ')}.${exam.sections.some(s => s.optional) ? ` ${exam.sections.filter(s => s.optional).map(s => s.name).join(' and ')} is optional and isn't part of the ${totalLabel()}.` : ''}`;
+  const extra = timeFactor() > 1
+    ? `<p class="note">Extended time is on: ${TIME_NAMES[timeFactor()]}, so every timer below is ${timeFactor() === 2 ? 'doubled' : 'half as long again'}. Change it in <a href="#/settings">Settings</a>, under Accessibility.</p>` : '';
   const short = exam.sections.filter(s => testableCount(s.id) < s.perModule * s.modules);
   view.innerHTML = `
     ${pageHead('Timed practice test', { eyebrow: exam.long })}
     <p class="lede">${intro}</p>
+    ${extra}
     <div class="cards">
       ${kinds.map(([k, title, sub, minutes, list]) => `
         <div class="card"><h2>${title}</h2><p class="muted">${sub} · ${hours(minutes)}</p><button class="primary" data-test="${k}" ${list.every(s => testableCount(s.id)) ? '' : 'disabled'}>Start</button></div>`).join('')}
@@ -1322,7 +1516,7 @@ function viewTest() {
     ${short.length ? `<p class="note">A full-length test needs ${short.map(s => `${s.perModule * s.modules} ${s.name}`).join(', ')} questions that can be scored automatically. You have ${short.map(s => `${testableCount(s.id)} ${s.name}`).join(', ')}, so sections will be shorter until you add more.</p>` : ''}
     ${progress.tests.length ? `<div class="card"><h2>Past tests</h2><div class="table-wrap"><table class="stack">
       <thead><tr><th>Date</th><th>Test</th>${scored.map(s => `<th>${s.name}</th>`).join('')}<th>${totalLabel()}</th></tr></thead>
-      <tbody>${[...progress.tests].reverse().map(t => `<tr><td>${new Date(t.at).toLocaleDateString()}</td><td data-label="Test">${esc(t.kind)}</td>
+      <tbody>${testHistory().reverse().map(t => `<tr><td>${new Date(takenAt(t)).toLocaleDateString()}</td><td data-label="Test">${esc(t.kind)}${t.timeFactor ? ` <span class="muted">· ${TIME_NAMES[t.timeFactor] ?? 'extended time'}</span>` : ''}</td>
         ${scored.map(s => `<td data-label="${s.name}">${t.summary[s.id] ? `${t.summary[s.id].score.mid}${t.summary[s.id].total ? ` <span class="muted">(${t.summary[s.id].correct}/${t.summary[s.id].total})</span>` : ''}` : '—'}</td>`).join('')}
         <td data-label="${totalLabel()}">${t.total ? t.total.mid : '—'}</td></tr>`).join('')}</tbody>
     </table></div></div>` : ''}`;
@@ -1333,7 +1527,7 @@ function startTest(kind) {
   test = {
     exam: examId,
     sections: kind === 'FULL' ? scoredSections(exam).map(s => s.id) : [kind], sIdx: 0, module: 1, route: null, used: new Set(), results: [],
-    panel: null, hideTimer: false, seenBefore: new Set(progress.responses.map(r => r.qid)),
+    panel: null, hideTimer: false, seenBefore: new Set(progress.responses.map(r => r.qid)), timeFactor: timeFactor(),
   };
   startModule();
   beginModule();
@@ -1357,7 +1551,7 @@ function startModule() {
 function beginModule() {
   const s = test;
   s.onBreak = false;
-  s.endsAt = Date.now() + sectionOf(exam, s.section).minutes * 60 * 1000;
+  s.endsAt = Date.now() + withTime(sectionOf(exam, s.section).minutes, s.timeFactor) * 60 * 1000;
   saveTest();
   renderNav('test');
   testScreen();
@@ -1371,7 +1565,7 @@ function testScreen() {
   view.innerHTML = `
     <div class="test ${s.highlightMode ? 'highlighting' : ''}">
       <header class="test-bar">
-        <div><strong>${format.name}</strong>${format.modules > 1 ? ` · Module ${s.module}` : ''}${short ? ` <span class="muted">(${plural(s.questions.length, 'question')})</span>` : ''}</div>
+        <div><strong>${format.name}</strong>${format.modules > 1 ? ` · Module ${s.module}` : ''}${short ? ` <span class="muted">(${plural(s.questions.length, 'question')})</span>` : ''}${s.timeFactor > 1 ? ` <span class="muted">· ${TIME_NAMES[s.timeFactor]}</span>` : ''}</div>
         <div><span id="timer" class="timer ${s.hideTimer ? 'concealed' : ''}"></span><button class="ghost small" id="toggle-timer">${s.hideTimer ? 'Show timer' : 'Hide'}</button></div>
         <div class="tools">
           ${toolButton('highlighter', 'Highlighter', { active: s.highlightMode, html: 'id="hl"' })}
@@ -1546,7 +1740,7 @@ function submitModule() {
   const responses = s.questions.map(q => {
     const choice = s.answers[q.id] ?? null;
     const correct = record(q, choice, 'test', s.times[q.id] || 0);
-    return { qid: q.id, correct, choice, domain: q.domain, b: DIFFICULTY_B[q.difficulty] ?? 0 };
+    return { qid: q.id, correct, choice, domain: q.domain, b: DIFFICULTY_B[q.difficulty] ?? 0, ms: s.times[q.id] || 0 };
   });
   s.results.push({ section: s.section, module: s.module, route: s.module === 2 ? s.route : null, responses });
   if (format.modules > 1 && s.module === 1) {
@@ -1576,7 +1770,7 @@ function moduleBreak() {
     : 'On test day the next section follows right after.';
   view.innerHTML = `<div class="empty">
     <h2>${newSection ? 'Section complete' : 'Module 1 complete'}</h2>
-    <p>Up next: <strong>${nextLabel}</strong> · ${plural(s.questions.length, 'question')} · ${format.minutes} minutes.</p>
+    <p>Up next: <strong>${nextLabel}</strong> · ${plural(s.questions.length, 'question')} · ${withTime(format.minutes, s.timeFactor)} minutes.</p>
     <p class="muted">${why} The timer starts when you continue.</p>
     <button class="primary" id="continue">Continue</button></div>`;
   on('#continue', 'click', beginModule);
@@ -1598,6 +1792,7 @@ function finishTest() {
   const full = scoredSections(exam).every(sec => s.sections.includes(sec.id));
   s.record = {
     id: `t${Date.now()}`, at: Date.now(), kind: full ? `Full ${exam.name}` : sectionName(s.sections[0]), summary,
+    ...(s.timeFactor > 1 ? { timeFactor: s.timeFactor } : {}),
     total: full ? totalScore(exam, Object.fromEntries(Object.entries(summary).map(([id, x]) => [id, x.score]))) : null,
     qids: s.results.flatMap(r => r.responses.map(x => x.qid)),
   };
@@ -1613,6 +1808,12 @@ function testResults() {
   const s = test;
   const { summary, total } = s.record;
   const all = s.results.flatMap(r => r.responses.map(x => ({ ...x, section: r.section, module: r.module })));
+  // Time a question in each section, on average, beside what test day allows (with the extra time this test had).
+  const pace = sec => { const f = sectionOf(exam, sec); return ((f.minutes * 60 * 1000) / f.perModule) * (s.timeFactor || 1); };
+  const perQuestion = sec => {
+    const times = all.filter(r => r.section === sec && r.ms).map(r => r.ms);
+    return times.length ? times.reduce((a, b) => a + b, 0) / times.length : null;
+  };
   const domainRows = exam.domains.map(d => {
     const rs = all.filter(r => r.domain === d.name);
     return rs.length ? `<tr><td>${esc(d.name)}</td><td class="num">${rs.filter(r => r.correct).length} / ${rs.length}</td></tr>` : '';
@@ -1622,7 +1823,8 @@ function testResults() {
     <div class="cards">
       ${Object.entries(summary).map(([sec, x]) => `<div class="card"><div class="eyebrow">${sectionName(sec)}</div>
         <div class="big">${x.score.mid}</div><div class="range">likely ${range(x.score)}</div>
-        <p class="muted">${x.correct} of ${x.total} correct${x.route ? ` · you were routed to the ${x.route === 'hard' ? 'harder' : 'easier'} module 2` : ''}</p></div>`).join('')}
+        <p class="muted">${x.correct} of ${x.total} correct${x.route ? ` · you were routed to the ${x.route === 'hard' ? 'harder' : 'easier'} module 2` : ''}</p>
+        ${perQuestion(sec) ? `<p class="pace-note ${paceState(perQuestion(sec), pace(sec))[0]}">About ${clock(perQuestion(sec))} a question · test day allows ${clock(pace(sec))}</p>` : ''}</div>`).join('')}
       ${total ? `<div class="card"><div class="eyebrow">${totalLabel()}</div><div class="big">${total.mid}</div><div class="range">likely ${range(total)}</div></div>` : ''}
     </div>
     <div class="card"><h2>By domain</h2><div class="table-wrap"><table><tbody>${domainRows}</tbody></table></div></div>
@@ -1680,6 +1882,12 @@ function todaysPlan() {
   if (due || reviewedToday) {
     tasks.push({ label: due ? `Clear ${plural(due, 'review question')}` : 'Clear review questions', minutes: Math.ceil(due * 1.2), done: !due, run: () => go('review/go') });
   }
+  // Flashcards, on a test whose lessons have them: what's due, and today's new ones.
+  const cards = cardsWaiting();
+  const cardsLeft = cards.due.length + cards.fresh.length;
+  if (cardsLeft || Object.values(progress.cards || {}).some(c => dayKey(c.updatedAt) === today)) {
+    tasks.push({ label: cardsLeft ? `Study ${plural(cardsLeft, 'flashcard')}` : 'Study flashcards', minutes: Math.ceil(cardsLeft / 4), done: !cardsLeft, run: () => go('cards') });
+  }
   const focus = weakestSkills(2);
   if (!left) {
     tasks.push({ label: `${goal} practice questions`, done: true });
@@ -1693,8 +1901,8 @@ function todaysPlan() {
     const section = exam.sections[0];
     tasks.push({ label: `${plural(left, 'practice question')} · ${section.name}`, minutes: Math.ceil(left * 1.2), done: false, run: () => go(`practice/${section.id}`) });
   }
-  const lastTest = progress.tests[progress.tests.length - 1];
-  if (pool.length && (!lastTest || Date.now() - lastTest.at > 7 * DAY_MS)) {
+  const lastTest = testHistory().at(-1);
+  if (pool.length && (!lastTest || Date.now() - takenAt(lastTest) > 7 * DAY_MS)) {
     const section = scoredSections(exam)[0];
     tasks.push({ label: `Timed ${section.name} section`, minutes: sectionMinutes([section]), done: false, run: () => go('test') });
   }
@@ -1839,7 +2047,7 @@ function railHtml(days) {
 function viewScores() {
   const total = projectedTotal();
   const target = progress.plan.target;
-  const history = progress.tests.filter(t => t.total);
+  const history = testHistory().filter(t => t.total);
   const weekAgo = Date.now() - 7 * DAY_MS;
   const thisWeek = progress.responses.filter(r => r.at > weekAgo).length;
   const lastWeek = progress.responses.filter(r => r.at <= weekAgo && r.at > weekAgo - 7 * DAY_MS).length;
@@ -1869,8 +2077,9 @@ function viewScores() {
       const estimate = sectionEstimate(s.id);
       return `<div class="kpi"><span class="eyebrow">${sectionTab(s)}${s.optional ? ' · optional' : ''}</span>${estimate ? `<strong>${estimate.mid}</strong><span class="muted">likely ${range(estimate)}</span>` : '<span class="muted">Not enough answers yet</span>'}</div>`;
     }).join('')}</div>
+    ${pacingHtml()}
     ${exam.id === 'psat' ? nationalMeritHtml() : ''}
-    ${exam.id === 'mcat' ? officialScoresHtml() : ''}
+    ${officialScoresHtml()}
     <div class="skill-lists">${exam.sections.map(sec => {
       const skills = skillAbilities(progress, sec.id, exam).filter(s => s.answered)
         .map(s => ({ ...s, p: pCorrect(s.theta, DIFFICULTY_B.Medium) })).sort((a, b) => a.p - b.p);
@@ -1883,50 +2092,116 @@ function viewScores() {
     <p class="hint">Estimates come from your answers and each question's difficulty. They aren't official ${exam.maker} scores.</p>`;
   on('[data-skill]', 'click', e => practiceSkill(e.currentTarget.dataset.section, e.currentTarget.dataset.skill));
   bindTrend(history);
-  if (exam.id === 'mcat') bindOfficialScores();
+  bindOfficialScores();
 }
 
-// Scores from the AAMC's own practice exams. Their questions can't be brought into the app, but the scores can:
-// entered here they join the practice-test history, the trend chart and the study plan like any timed test.
+// Where the student stands on time in each section, and the skills they get right but slowly: accurate already, so
+// speed is what's left to work on there.
+function pacingHtml() {
+  const rows = exam.sections.map(sec => {
+    const recent = progress.responses.filter(r => r.section === sec.id && timedAnswer(r)).slice(-60);
+    return { sec, typical: median(recent.map(r => r.ms)), pace: paceMs(sec.id), count: recent.length };
+  }).filter(row => row.count >= 5);
+  const slow = exam.sections.flatMap(sec => skillsOf(exam, sec.id).map(k => {
+    const recent = progress.responses.filter(r => r.section === sec.id && r.skill === k.name && timedAnswer(r)).slice(-30);
+    const right = recent.filter(r => r.correct && !r.guessed);
+    return { name: k.name, section: sec.id, count: recent.length, accuracy: recent.length ? right.length / recent.length : 0, typical: median(right.map(r => r.ms)), pace: paceMs(sec.id) };
+  })).filter(k => k.count >= 4 && k.accuracy >= 0.7 && k.typical > k.pace * 1.25)
+    .sort((a, b) => b.typical / b.pace - a.typical / a.pace).slice(0, 5);
+  const extra = timeFactor() > 1 ? `, with ${TIME_NAMES[timeFactor()]}` : '';
+  return `<section class="card pacing">
+      <header class="card-head"><h2>Pacing</h2><span class="muted">your typical time a question</span></header>
+      ${rows.length ? `<ul class="pace-list">${rows.map(({ sec, typical, pace }) => {
+        const [state, label] = paceState(typical, pace);
+        return `<li><span class="name">${esc(sectionTab(sec))}</span>
+          <span class="pace-track" aria-hidden="true"><i class="pace-fill ${state}" style="width:${Math.min(100, (typical / (pace * 2)) * 100)}%"></i><i class="pace-mark"></i></span>
+          <span class="pace-num">${clock(typical)} <small>vs ${clock(pace)}</small></span>
+          <span class="mastery-chip ${state}"><i aria-hidden="true"></i>${label}</span></li>`;
+      }).join('')}</ul>` : '<p class="muted">Answer at least five questions in a section to see how your pace compares with test day.</p>'}
+      ${slow.length ? `<h3>Right, but slow</h3>
+        <p class="hint">You usually get these right, so speed is what’s left to work on.</p>
+        <ul class="skill-list">${slow.map(k => `<li><span>${esc(skillLabel(k.name))}</span><span class="muted">${clock(k.typical)} vs ${clock(k.pace)}</span>
+          <button type="button" class="small ghost" data-skill="${esc(k.name)}" data-section="${k.section}" aria-label="Practice ${esc(skillLabel(k.name))}">Practice</button></li>`).join('')}</ul>` : ''}
+      <p class="hint">The line on each bar is test-day pace: ${exam.sections.map(sec => `${clock(paceMs(sec.id))} a question in ${sectionTab(sec)}`).join(', ')}${extra}. Your time is the middle of your last 60 answers in the section, from practice, review and timed tests.</p>
+    </section>`;
+}
+
+// Scores from the test makers' own full-length practice tests: Bluebook's for the SAT and PSATs, ACT's scored with
+// its answer key, and the AAMC's. Their questions can't be brought into the app, but the scores can: entered here
+// they join the practice-test history, the trend chart and the study plan like any timed test. Each keeps the app's
+// own estimate from the moment it was logged, so the two can be compared.
+const OFFICIAL_TESTS = {
+  sat: { title: 'Official practice tests', maker: 'Bluebook', about: 'Took a full-length practice test in Bluebook? Enter your section scores from My Practice' },
+  psat: { title: 'Official practice tests', maker: 'Bluebook', about: 'Took a full-length PSAT practice test in Bluebook? Enter your section scores from My Practice' },
+  psat89: { title: 'Official practice tests', maker: 'Bluebook', about: 'Took a full-length PSAT 8/9 practice test in Bluebook? Enter your section scores from My Practice' },
+  act: { title: 'Official ACT practice tests', maker: 'ACT', about: 'Scored one of ACT’s own practice tests with its answer key and scoring table? Enter your section scores; Science is optional' },
+  mcat: { title: 'Official AAMC practice exams', maker: 'AAMC', about: 'Took one of the AAMC’s practice exams on its own site? Enter your section scores' },
+};
+
 function officialScoresHtml() {
-  const logged = progress.tests.filter(t => t.official);
-  const scored = scoredSections(exam);
+  const info = OFFICIAL_TESTS[examId];
+  if (!info) return '';
+  const logged = testHistory().filter(t => t.official);
+  const { min, max, step } = exam.scale;
+  const today = dayKey(Date.now());
+  const versus = t => {
+    if (!t.total || !t.estimate) return '—';
+    const gap = t.total.mid - t.estimate.mid;
+    return `${t.estimate.mid}${gap ? ` <span class="muted">(${gap > 0 ? `${gap} under` : `${-gap} over`})</span>` : ''}`;
+  };
   return `<section class="card official">
-      <header class="card-head"><h2>Official AAMC practice exams</h2><span class="muted">${logged.length ? plural(logged.length, 'exam') + ' logged' : 'none logged yet'}</span></header>
-      <p class="hint">Took one of the AAMC’s practice exams on its own site? Enter your section scores (${exam.scale.min}–${exam.scale.max}) to track them here.</p>
+      <header class="card-head"><h2>${info.title}</h2><span class="muted">${logged.length ? plural(logged.length, 'test') + ' logged' : 'none logged yet'}</span></header>
+      <p class="hint">${info.about} (${min}–${max}${step > 1 ? `, in steps of ${step}` : ''}) to track them here, beside what this app estimated.</p>
       <form id="official-form" class="official-form">
-        ${scored.map(sec => `<label>${sec.short}<input type="number" id="official-${sec.id}" name="${sec.id}" min="${exam.scale.min}" max="${exam.scale.max}" step="1" required inputmode="numeric"></label>`).join('')}
-        <label>Exam<input type="text" id="official-name" name="name" maxlength="40" placeholder="e.g. Sample Test"></label>
+        ${exam.sections.map(sec => `<label>${sec.short}${sec.optional ? ' <small>(optional)</small>' : ''}<input type="number" id="official-${sec.id}" name="${sec.id}" min="${min}" max="${max}" step="${step}" ${sec.optional ? '' : 'required'} inputmode="numeric"></label>`).join('')}
+        <label>Taken on<input type="date" id="official-date" name="date" value="${today}" max="${today}" required></label>
+        <label>Test<input type="text" id="official-name" name="name" maxlength="40" placeholder="e.g. Practice Test 4"></label>
         <button type="submit" class="button">Add scores</button>
       </form>
       <p class="warn" id="official-error" role="alert"></p>
       ${logged.length ? `<div class="table-wrap"><table class="stack">
-        <thead><tr><th>Date</th><th>Exam</th>${scored.map(sec => `<th class="num">${sec.short}</th>`).join('')}<th class="num">Total</th></tr></thead>
-        <tbody>${[...logged].reverse().map(t => `<tr><td>${new Date(t.at).toLocaleDateString()}</td><td data-label="Exam">${esc(t.kind)}</td>
-          ${scored.map(sec => `<td class="num" data-label="${sec.short}">${t.summary[sec.id]?.score.mid ?? '—'}</td>`).join('')}
-          <td class="num" data-label="Total"><strong>${t.total?.mid ?? '—'}</strong></td></tr>`).join('')}</tbody>
+        <thead><tr><th>Taken</th><th>Test</th>${exam.sections.map(sec => `<th class="num">${sec.short}</th>`).join('')}<th class="num">${exam.total.label ?? 'Total'}</th><th class="num">App’s estimate then</th><th><span class="visually-hidden">Remove</span></th></tr></thead>
+        <tbody>${[...logged].reverse().map(t => `<tr><td>${new Date(takenAt(t)).toLocaleDateString()}</td><td data-label="Test">${esc(t.kind)}</td>
+          ${exam.sections.map(sec => `<td class="num" data-label="${sec.short}">${t.summary[sec.id]?.score.mid ?? '—'}</td>`).join('')}
+          <td class="num" data-label="${exam.total.label ?? 'Total'}"><strong>${t.total?.mid ?? '—'}</strong></td>
+          <td class="num" data-label="App’s estimate then">${versus(t)}</td>
+          <td class="num"><button type="button" class="link" data-remove-test="${esc(t.id)}">Remove</button></td></tr>`).join('')}</tbody>
       </table></div>` : ''}
     </section>`;
 }
 
 function bindOfficialScores() {
+  const info = OFFICIAL_TESTS[examId];
   on('#official-form', 'submit', e => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    const scored = scoredSections(exam);
-    const scores = Object.fromEntries(scored.map(sec => [sec.id, Number(form.get(sec.id))]));
-    const bad = scored.find(sec => !Number.isInteger(scores[sec.id]) || scores[sec.id] < exam.scale.min || scores[sec.id] > exam.scale.max);
-    if (bad) { $('#official-error').textContent = `${bad.short} must be a whole number from ${exam.scale.min} to ${exam.scale.max}.`; return; }
+    const { min, max, step } = exam.scale;
+    const entered = exam.sections.filter(sec => !sec.optional || String(form.get(sec.id) ?? '').trim() !== '');
+    const scores = Object.fromEntries(entered.map(sec => [sec.id, Number(form.get(sec.id))]));
+    const bad = entered.find(sec => !Number.isInteger(scores[sec.id]) || scores[sec.id] < min || scores[sec.id] > max || (scores[sec.id] - min) % step);
+    if (bad) {
+      $('#official-error').textContent = `${bad.short} must be a whole number from ${min} to ${max}${step > 1 ? ` in steps of ${step}` : ''}.`;
+      return;
+    }
+    const date = String(form.get('date') || '');
+    const taken = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T12:00`).getTime() : Date.now();
+    if (taken > Date.now() + DAY_MS) { $('#official-error').textContent = 'The date can’t be in the future.'; return; }
     const exact = v => ({ low: v, mid: v, high: v });
     const name = String(form.get('name') || '').trim();
+    const summary = Object.fromEntries(entered.map(sec => [sec.id, { score: exact(scores[sec.id]) }]));
     progress.tests.push({
-      id: `aamc-${Date.now()}`, at: Date.now(), official: true, kind: name ? `AAMC: ${name}` : 'AAMC practice exam',
-      summary: Object.fromEntries(scored.map(sec => [sec.id, { score: exact(scores[sec.id]) }])),
-      total: totalScore(exam, Object.fromEntries(scored.map(sec => [sec.id, exact(scores[sec.id])]))),
-      qids: [],
+      id: `official-${Date.now()}`, at: Date.now(), takenAt: taken, official: true,
+      kind: name ? `${info.maker}: ${name}` : `${info.maker} practice test`,
+      summary, total: totalScore(exam, Object.fromEntries(entered.map(sec => [sec.id, exact(scores[sec.id])]))),
+      estimate: projectedTotal(), qids: [],
     });
     save();
     toast('Scores added');
+    render({ quiet: true });
+  });
+  confirmButton('[data-remove-test]', 'Click again to remove', button => {
+    replaceProgress(examId, removeTest(progress, button.dataset.removeTest), { push: true });
+    toast('Removed');
     render({ quiet: true });
   });
 }
@@ -1984,6 +2259,7 @@ function viewLesson(lesson) {
       </div>
       <div class="actions">
         ${count ? `<button type="button" class="button primary" id="check">Check yourself: ${plural(count, 'question')}</button>` : ''}
+        <a class="button" href="#/cards/${esc(lesson.id)}">Study these terms as flashcards</a>
       </div>
       <h2>Go deeper</h2>
       <ul class="links">${lesson.links.map(l => `<li><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a></li>`).join('')}</ul>
@@ -2046,11 +2322,11 @@ function trendHtml(history, target) {
   const ticks = [];
   for (let v = yMin; v <= yMax; v += step) ticks.push(v);
   const line = values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
-  const date = t => new Date(t.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const date = t => new Date(takenAt(t)).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   const every = points.length > 6 ? 2 : 1;
   const last = points.length - 1;
   return `<div class="chart" id="trend">
-      <h3>${title}</h3><p class="muted">Last ${plural(points.length, 'full timed test')}</p>
+      <h3>${title}</h3><p class="muted">Last ${plural(points.length, 'full test')}${points.some(t => t.official) ? ', official scores included' : ''}</p>
       <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${title}: ${points.map((t, i) => `${date(t)} ${values[i]}`).join(', ')}">
         <g class="chart-grid">${ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"/>`).join('')}</g>
         <g class="chart-axis">${ticks.map(v => `<text x="${L - 8}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end">${v}</text>`).join('')}
@@ -2066,7 +2342,7 @@ function trendHtml(history, target) {
       <div class="chart-tip" id="trend-tip" hidden></div>
       <details class="chart-table"><summary>View as table</summary>
         <table><thead><tr><th>Test date</th><th>${exam.total.label ?? 'Total'}</th><th>Likely range</th></tr></thead>
-        <tbody>${points.map(t => `<tr><td>${date(t)}</td><td class="num">${t.total.mid}</td><td class="num">${range(t.total)}</td></tr>`).join('')}</tbody></table>
+        <tbody>${points.map(t => `<tr><td>${date(t)}</td><td class="num">${t.total.mid}</td><td class="num">${t.official ? 'official score' : range(t.total)}</td></tr>`).join('')}</tbody></table>
       </details>
     </div>`;
 }
@@ -2093,7 +2369,7 @@ function bindTrend(history) {
     cross.setAttribute('visibility', 'visible');
     const boxRect = box.getBoundingClientRect();
     tip.hidden = false;
-    tip.textContent = `${new Date(points[i].at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${points[i].total.mid} (likely ${range(points[i].total)})`;
+    tip.textContent = `${new Date(takenAt(points[i])).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · ${points[i].total.mid}${points[i].official ? ` (${points[i].kind})` : ` (likely ${range(points[i].total)})`}`;
     tip.style.left = `${rect.left - boxRect.left + cx * scale}px`;
     tip.style.top = `${rect.top - boxRect.top + cy * scale}px`;
   };
@@ -2247,8 +2523,9 @@ function sharedLibraryCard() {
   const status = {
     idle: '<p class="hint">Checking…</p>',
     checking: '<p class="hint">Checking whether this account has been invited…</p>',
+    joining: '<p class="hint">Joining with your link…</p>',
     'not-invited': `<p class="hint">This account hasn’t been invited to the shared library, so practice uses the
-      questions built into the site. If you’ve been given an invite code, enter it here.</p>
+      questions built into the site. If you’ve been given an invite link, open it; if you have a code, enter it here.</p>
       <form class="code-form" id="join-library">
         <label for="invite-code">Invite code</label>
         <input id="invite-code" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required>
@@ -2271,35 +2548,54 @@ function sharedLibraryCard() {
   return card(status + admin);
 }
 
-// What only the admin sees: the code testers join with, and who has joined.
+// What only the admin sees: the two links into the library, and who has joined with them.
+const joinAddress = (kind, code) => `${location.origin}${location.pathname}#/${kind}/${code}`;
+
 function testersPanel(panel) {
-  if (!panel) return '<h3>Testers</h3><p class="hint">Loading…</p>';
-  if (panel.error) return `<h3>Testers</h3><p class="warn">${esc(panel.error)}</p>`;
-  const joined = panel.testers.length
-    ? `<ul class="tester-list">${panel.testers.map(t => `
+  if (!panel) return '<h3>Invite links</h3><p class="hint">Loading…</p>';
+  if (panel.error) return `<h3>Invite links</h3><p class="warn">${esc(panel.error)}</p>`;
+  const linkRow = (id, kind, code) => `<div class="link-row">
+      <input id="${id}" readonly value="${esc(joinAddress(kind, code))}" aria-label="${kind === 'personal' ? 'Your personal link' : 'Tester link'}">
+      <button type="button" data-copy="#${id}">Copy link</button>
+    </div>`;
+  // Devices that joined with the personal link are named after it, so they can be told apart from testers.
+  const personalDevice = t => t.name.startsWith(PERSONAL_NAME);
+  const listOf = (people, empty) => (people.length
+    ? `<ul class="tester-list">${people.map(t => `
         <li><span>${esc(t.name || 'An account with no name')}</span>
           <span class="hint">${t.joinedAt ? `joined ${new Date(t.joinedAt).toLocaleDateString()}` : 'added by hand'}</span>
           <button type="button" class="link" data-remove-tester="${esc(t.uid)}">Remove</button></li>`).join('')}</ul>`
-    : '<p class="hint">Nobody has joined yet.</p>';
-  return `<h3>Testers</h3>
-    <p class="hint">${panel.code
-      ? 'Anyone who signs in and enters this code gets the whole library. Change it to stop new people joining; everyone already in keeps their access.'
-      : 'Choose a code to give your testers. Anyone who signs in and enters it gets the whole library.'}</p>
+    : `<p class="hint">${empty}</p>`);
+  return `<h3>Tester link</h3>
+    <p class="hint">Send this to testers. It asks them to sign in or create an account, then gives them the whole library.
+      Changing the code stops the old link working for anyone new; everyone already in keeps their access.</p>
+    ${panel.code ? linkRow('tester-link', 'invite', panel.code) : '<p class="hint">Choose a code below to make the link.</p>'}
     <form class="code-form" id="invite-form">
-      <label for="invite-new">Invite code</label>
+      <label for="invite-new">Code</label>
       <input id="invite-new" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(panel.code ? readableCode(panel.code) : suggestCode())}">
       <button type="submit">${panel.code ? 'Change code' : 'Save code'}</button>
     </form>
-    ${joined}`;
+    <h3>Your personal link</h3>
+    <p class="hint">For your own devices and for testing. Opening it gives that browser the whole library straight away,
+      without signing in. Anyone who has it gets in, so keep it to yourself; change it if it gets out.</p>
+    ${panel.personal ? linkRow('personal-link', 'personal', panel.personal) : ''}
+    <form class="code-form" id="personal-form">
+      <label for="personal-new">Code</label>
+      <input id="personal-new" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(panel.personal ? readableCode(panel.personal) : suggestCode(16))}">
+      <button type="submit"${panel.personal ? '' : ' class="primary"'}>${panel.personal ? 'Change link' : 'Make my personal link'}</button>
+    </form>
+    <h3>Who has joined</h3>
+    ${listOf(panel.testers.filter(t => !personalDevice(t)), 'No testers have joined yet.')}
+    ${panel.testers.some(personalDevice) ? `<h3>Devices using your personal link</h3>${listOf(panel.testers.filter(personalDevice), '')}` : ''}`;
 }
 
 // Shown in groups of four so it is easy to read out; it is compared without the dashes, so either works.
 const readableCode = code => code.replace(/(.{4})(?=.)/g, '$1-');
 
 // A code that is hard to guess but easy to read aloud: no 0/o, 1/l or i, in groups of four.
-function suggestCode() {
+function suggestCode(length = 12) {
   const letters = 'abcdefghjkmnpqrstuvwxyz23456789';
-  const picks = crypto.getRandomValues(new Uint8Array(12));
+  const picks = crypto.getRandomValues(new Uint8Array(length));
   return Array.from(picks, n => letters[n % letters.length]).join('').replace(/(.{4})(?=.)/g, '$1-');
 }
 
@@ -2325,11 +2621,29 @@ function bindSharedLibraryCard() {
     e.preventDefault();
     try {
       const code = await saveInviteCode($('#invite-new').value);
-      toast(`Invite code saved: ${readableCode(code)}`);
+      toast(`Tester code saved: ${readableCode(code)}. The link below uses it now.`);
       loadTestersPanel();
     } catch (err) {
       toast(err.message);
     }
+  });
+  on('#personal-form', 'submit', async e => {
+    e.preventDefault();
+    if (plainCode($('#personal-new').value).length < MIN_PERSONAL_CODE) {
+      return toast(`Your personal link needs a code of at least ${MIN_PERSONAL_CODE} letters or numbers, since it works without signing in.`);
+    }
+    try {
+      await savePersonalCode($('#personal-new').value);
+      toast('Personal link saved. Copy it below.');
+      loadTestersPanel();
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  on('[data-copy]', 'click', async e => {
+    const field = $(e.currentTarget.dataset.copy);
+    toast(await copyText(field.value) ? 'Link copied' : 'Couldn’t copy it here. Select the link and copy it yourself.');
+    field.select();
   });
   on('[data-remove-tester]', 'click', async e => {
     const button = e.currentTarget;
@@ -2350,8 +2664,8 @@ function bindSharedLibraryCard() {
 
 async function loadTestersPanel() {
   try {
-    const [code, testers] = await Promise.all([readInviteCode(), listTesters()]);
-    cloudLibrary = { ...cloudLibrary, admin: { code, testers } };
+    const [codes, testers] = await Promise.all([readInviteCodes(), listTesters()]);
+    cloudLibrary = { ...cloudLibrary, admin: { ...codes, testers } };
   } catch {
     cloudLibrary = { ...cloudLibrary, admin: { error: 'The tester list could not be loaded. Check that the latest firestore.rules are published.' } };
   }
@@ -2388,6 +2702,148 @@ async function uploadSharedLibrary(button) {
     button.textContent = label;
     button.disabled = false;
   }
+}
+
+// ---------- invite links ----------
+//
+// Two links bring a device into the shared library (see library-cloud.js). The tester link asks for an account,
+// then joins it; the owner's personal link joins straight away, with no account. The code comes out of the address
+// as soon as the page opens, so it isn't left in the browser's history, and is kept for this tab until the device
+// has joined, since the tester link has to wait for somebody to sign in first. syncCloudLibrary does the joining.
+
+const JOIN_KEY = 'satprep.join';
+const PERSONAL_NAME = 'Personal link';
+let joinLink = null;       // { kind: 'invite' | 'personal', code } until the device has joined
+let joinProblem = null;    // why the last link didn't work, shown on its page
+let startingGuest = false;
+
+function pendingJoin() {
+  if (!joinLink) {
+    try { joinLink = JSON.parse(sessionStorage.getItem(JOIN_KEY)); } catch { /* storage unavailable */ }
+  }
+  return joinLink ?? null;
+}
+function rememberJoin(link) {
+  joinLink = link;
+  try { sessionStorage.setItem(JOIN_KEY, JSON.stringify(link)); } catch { /* kept in memory instead */ }
+}
+function forgetJoin() {
+  joinLink = null;
+  try { sessionStorage.removeItem(JOIN_KEY); } catch { /* storage unavailable */ }
+}
+
+// What the tester list calls a device that joined with the personal link, since it has no account name.
+function deviceName() {
+  const ua = navigator.userAgent;
+  const browser = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\/|FxiOS/.test(ua) ? 'Firefox'
+    : /Chrome\/|CriOS/.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'a browser';
+  const system = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android'
+    : /CrOS/.test(ua) ? 'Chromebook' : /Mac OS X/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : '';
+  return system ? `${browser} on ${system}` : browser;
+}
+
+// The personal link works without an account, so a device that opens it signed out signs in as a guest; joining
+// follows once that sign-in lands (syncCloudLibrary). Called when the page opens and again once a saved sign-in has
+// been restored, since until then it isn't known whether this device is signed in already.
+function continueJoin() {
+  const link = pendingJoin();
+  if (!syncConfigured || link?.kind !== 'personal' || startingGuest) return;
+  const sync = syncState();
+  if (sync.phase === 'loading' || sync.account) return;
+  startingGuest = true;
+  signInAsGuest()
+    .catch(err => {
+      forgetJoin();
+      joinProblem = err.message || 'This device couldn’t be set up with the link. Try opening it again.';
+      if (JOIN_ROUTES.includes(currentRoute)) render({ quiet: true });
+    })
+    .finally(() => { startingGuest = false; });
+}
+
+// Joins the tester list with the link waiting in this tab. Returns the access it gave, or null.
+async function joinFromLink(uid, link) {
+  forgetJoin();
+  cloudLibrary = { status: 'joining', access: null };
+  refreshForLibrary();
+  try {
+    await joinWithCode(uid, link.code, link.kind === 'personal' ? `${PERSONAL_NAME} · ${deviceName()}` : syncState().account, { link: true });
+    toast(link.kind === 'personal' ? 'This device is in. Loading the shared library…' : 'You’re in. Loading the shared library…');
+    return 'tester';
+  } catch (err) {
+    joinProblem = err.message;
+    return null;
+  }
+}
+
+function viewJoin(kind, code) {
+  const plain = plainCode(code);
+  if (plain) {
+    rememberJoin({ kind, code: plain });
+    joinProblem = null;
+    history.replaceState(null, '', `#/${kind}`);
+    cloudLibraryFor = null;      // look again, now that there is a link to join with
+    if (syncConfigured && syncState().uid) syncCloudLibrary(syncState());
+  }
+  const personal = kind === 'personal';
+  const link = pendingJoin();
+  const sync = syncConfigured ? syncState() : null;
+  const head = pageHead(personal ? 'Your personal link' : 'You’re invited', { eyebrow: APP_NAME });
+  const next = '<div class="actions"><a class="button primary" href="#/home">Start studying</a></div>';
+  if (!sync) {
+    view.innerHTML = `${head}<p class="note">This copy of ${APP_NAME} has no shared library, so there is nothing to join.</p>`;
+    return;
+  }
+  if (joinProblem) {
+    view.innerHTML = `${head}<p class="warn">${esc(joinProblem)}</p>
+      <div class="actions"><a class="button" href="#/home">Go to the dashboard</a></div>`;
+    return;
+  }
+  if (sync.phase === 'loading' || (link?.kind === 'personal' && !sync.account)) {
+    view.innerHTML = `${head}<p class="muted">${link?.kind === 'personal' ? 'Setting up this device…' : 'Connecting…'}</p>`;
+    continueJoin();
+    return;
+  }
+  // The tester link needs an account: signed out, or only a guest from the personal link, the student signs in here
+  // first, and joins the moment they do.
+  if (link?.kind === 'invite' && (!sync.account || sync.guest)) {
+    view.innerHTML = `${head}
+      <p class="lede">You’ve been invited to ${APP_NAME}’s shared library: official College Board and ACT practice
+        questions, on top of the ones built into the site.</p>
+      <p class="muted">Sign in or create an account, and you’ll join straight away. Your progress is kept with the
+        account, so it follows you to every device you sign in on.</p>
+      ${signInFormsHtml(sync)}`;
+    bindSignInForms();
+    return;
+  }
+  if (!link && !sync.account) {
+    view.innerHTML = `${head}<p class="muted">Open the link you were sent again to join.</p>
+      <div class="actions"><a class="button" href="#/home">Go to the dashboard</a></div>`;
+    return;
+  }
+  view.innerHTML = `${head}
+    <p class="muted">${sync.guest ? 'This device is using your personal link, without an account.' : `Signed in as ${esc(sync.account)}.`}</p>
+    ${sharedLibraryCard()}
+    ${next}`;
+  bindSharedLibraryCard();
+}
+
+// Copying from inside another page (an about:blank tab, say) can be refused by the clipboard API; the older way
+// still works there.
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch { /* fall back below */ }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(area);
+  area.select();
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch { /* not allowed here either */ }
+  area.remove();
+  return copied;
 }
 
 // ---------- questions a student brings themselves ----------
@@ -2485,9 +2941,19 @@ const SETTING_GROUPS = [
   ['textsize', 'Text size', 'Scales the questions, passages and everything else.'],
   ['contrast', 'Contrast', 'Turn this up if text or borders are hard to make out.'],
   ['motion', 'Animation', 'How much the app moves as pages and answers appear.'],
-  ['explain', 'Explain with AI', `A hint before you answer, and an explanation afterwards, written by Google’s Gemini. You need to be signed in to use it, and each student gets ${AI_DAILY_LIMIT} a day, since Gemini’s free allowance is shared by everyone. Questions you ask about are sent to Google.`],
+  ['time', 'Extended time', 'For timed practice tests, if you’re approved for extra time on test day. Each section’s timer, and the pace the app measures you against, get the extra time.'],
+  ['explain', 'Explain with AI', `A hint before you answer, and an explanation afterwards, written by Google’s Gemini. It needs you to be signed in, or your own Gemini key (below), and each student gets ${AI_DAILY_LIMIT} a day from the shared allowance. Questions you ask about are sent to Google.`],
   ['questions', 'Questions written for this app', 'Alongside the official College Board and ACT questions there are 400 SAT-style ones written for this app, each answer checked by a test. Your progress on them is kept either way.'],
 ];
+// How the Settings page groups them.
+const SETTING_SECTIONS = [
+  ['Appearance', ['theme', 'accent']],
+  ['Accessibility', ['textsize', 'contrast', 'motion', 'time']],
+  ['Study', ['explain', 'questions']],
+];
+// Extra time on timed tests, as a multiple of the standard time (Settings, Accessibility).
+const timeFactor = () => Number(settings.time) || 1;
+const TIME_NAMES = { 1.5: 'time and a half', 2: 'double time' };
 
 // Bring your own Gemini key: a free key from Google AI Studio gives this student their own allowance, instead of
 // a share of the site's. Signed in, it is kept with the account and follows the student between devices; signed
@@ -2581,8 +3047,8 @@ function viewSettings() {
   view.innerHTML = `
     ${pageHead('Settings', { eyebrow: APP_NAME })}
     <p class="muted">These settings belong to this device, not your account, so a phone and a laptop can each be set up the way that suits them.</p>
-    <div class="settings-grid">
-      ${SETTING_GROUPS.filter(([key]) => (key !== 'explain' || explainConfigured)
+    ${SETTING_SECTIONS.map(([heading, keys]) => {
+      const cards = SETTING_GROUPS.filter(([key]) => keys.includes(key) && (key !== 'explain' || explainConfigured)
         // Without any official questions the written ones are all there is, so the choice would do nothing.
         && (key !== 'questions' || allQuestions.some(isOfficial))).map(([key, title, note]) => {
         // Until one is picked, the choice showing is the one this account gets on its own.
@@ -2590,7 +3056,7 @@ function viewSettings() {
         const auto = key === 'questions' && settings.questions === 'auto';
         return `
         <section class="card setting">
-          <h2 id="set-${key}">${title}</h2>
+          <h3 id="set-${key}">${title}</h3>
           <p class="hint">${note}${auto ? ` Set for your account${invitedToLibrary() ? ', because you have the official library' : ''}; pick one to choose for yourself.` : ''}</p>
           <div class="swatches" role="radiogroup" aria-labelledby="set-${key}">
             ${CHOICES[key].map(([value, label, about]) => `
@@ -2602,8 +3068,9 @@ function viewSettings() {
               </button>`).join('')}
           </div>
         </section>`;
-      }).join('')}
-    </div>
+      }).join('');
+      return cards ? `<h2 class="settings-heading">${heading}</h2><div class="settings-grid">${cards}</div>` : '';
+    }).join('')}
     ${settings.explain === 'on' ? ownKeyCardHtml() : ''}
     <div class="card">
       <h2>Sample</h2>
@@ -2766,6 +3233,25 @@ function viewAccount() {
     view.innerHTML = `${pageHead('Account')}<p class="muted">Connecting…</p>`;
     return;
   }
+  // A device on the owner's personal link has no account to show, but can sign in to one from here.
+  if (sync.guest) {
+    view.innerHTML = `
+      ${pageHead('Account')}
+      <div class="card">
+        <h2>This device uses your personal link</h2>
+        <p>It has the shared library without being signed in to an account. Progress made here is kept for this
+          device, and backed up, but not with your account.</p>
+        <div class="actions"><button class="danger" id="sign-out">Stop using the link here</button></div>
+        <p class="hint">Stopping takes the shared library off this device, and the progress made here with the link can’t be
+          brought back afterwards. Opening your personal link here again gets the library back, starting fresh.</p>
+      </div>
+      <h2>Sign in to your account instead</h2>
+      <p class="muted">This device switches to your account and its progress. What was done here with the link stays with the link.</p>
+      ${signInFormsHtml(sync)}`;
+    confirmButton('#sign-out', 'Click again to stop', () => signOutOfSync());
+    bindSignInForms();
+    return;
+  }
   if (sync.account) {
     const time = sync.lastSynced && new Date(sync.lastSynced).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const status = sync.phase === 'error' ? sync.message : sync.phase === 'synced' ? `Up to date${time ? ` · last synced ${time}` : ''}.` : 'Syncing…';
@@ -2797,7 +3283,13 @@ function viewAccount() {
   view.innerHTML = `
     ${pageHead('Sign in to sync')}
     <p class="muted">Keep your progress on every device you study on. Progress already on this device is added to your account.</p>
-    <div class="cards">
+    ${signInFormsHtml(sync)}`;
+  bindSignInForms();
+}
+
+// Signing in, as the Account page and the tester link both offer it.
+function signInFormsHtml(sync) {
+  return `<div class="cards">
       <div class="card">
         <h2>Google</h2>
         <p>Sign in with your Google account.</p>
@@ -2812,8 +3304,10 @@ function viewAccount() {
       </form>
     </div>
     <p class="warn" id="auth-error" role="alert">${esc(sync.phase === 'error' ? sync.message : '')}</p>`;
+}
 
-  const buttons = () => view.querySelectorAll('.card button');
+function bindSignInForms() {
+  const buttons = () => view.querySelectorAll('#google, #username-form button');
   const attempt = async action => {
     buttons().forEach(b => { b.disabled = true; });
     $('#auth-error').textContent = '';
@@ -2897,28 +3391,45 @@ function refreshForLibrary({ questionsChanged = false } = {}) {
 
 let cloudLibraryFor = null;   // the uid whose library has been looked up already
 
+// The shared questions belong to whichever account loaded them. They go when it signs out, and when another
+// account takes its place without signing out in between, which a guest on the personal link can do by signing in.
+function dropCloudQuestions() {
+  if (!cloudQuestions.length) return false;
+  cloudQuestions = [];
+  applyLibrary();
+  return true;
+}
+
 async function syncCloudLibrary({ uid }) {
   if (cloudLibraryFor === uid) return;
+  const previous = cloudLibraryFor;
   cloudLibraryFor = uid;
   const stale = () => cloudLibraryFor !== uid;   // signed out, or switched account, while we asked
 
   if (!uid) {
-    const had = cloudQuestions.length > 0;
-    if (had) {
-      cloudQuestions = [];
-      applyLibrary();
-    }
+    const had = dropCloudQuestions();
     cloudLibrary = { status: 'idle', access: null };
     return refreshForLibrary({ questionsChanged: had });
   }
 
+  const switched = Boolean(previous && previous !== uid) && dropCloudQuestions();
   cloudLibrary = { status: 'checking', access: null };
-  refreshForLibrary();
-  const access = await libraryAccess(uid);
+  refreshForLibrary({ questionsChanged: switched });
+  let access = await libraryAccess(uid);
   if (stale()) return;
+  // A link waiting in this tab (see "invite links"): already in, there is nothing to join; otherwise join with it.
+  // The tester link waits for an account, so a personal-link guest keeps it until they sign in with one.
+  const link = pendingJoin();
+  if (link && access) forgetJoin();
+  else if (link && (link.kind === 'personal' || !syncState().guest)) {
+    access = await joinFromLink(uid, link);
+    if (stale()) return;
+    if (JOIN_ROUTES.includes(currentRoute)) render({ quiet: true });
+  }
   if (!access) {
+    const had = dropCloudQuestions();
     cloudLibrary = { status: 'not-invited', access: null };
-    return refreshForLibrary();
+    return refreshForLibrary({ questionsChanged: had });
   }
 
   cloudLibrary = { status: 'loading', access };
@@ -2964,6 +3475,8 @@ loadLibrary().then(result => {
   });
   let lastPhase = null;
   let wasSignedIn = false;
+  let lastUid = null;
+  let restoring = true;   // until Firebase says whether a sign-in was saved on this device
   initSync({
     exams: EXAM_IDS,
     getProgress: id => progressByExam[id],
@@ -3008,7 +3521,14 @@ loadLibrary().then(result => {
       // behind for whoever uses the device next.
       if (wasSignedIn && !nowSignedIn && ownKeyAccount()) setOwnKey('');
       if (nowSignedIn !== wasSignedIn && ['practice', 'review', 'mistakes', 'settings'].includes(currentRoute)) render({ quiet: true });
+      // A link's page moves on when the saved sign-in has been restored, and whenever the account changes.
+      else if (JOIN_ROUTES.includes(currentRoute) && ((restoring && state.phase !== 'loading') || state.uid !== lastUid)) render({ quiet: true });
       wasSignedIn = nowSignedIn;
+      lastUid = state.uid;
+      if (state.phase !== 'loading') {
+        restoring = false;
+        continueJoin();
+      }
       syncCloudLibrary(state);
     },
   });

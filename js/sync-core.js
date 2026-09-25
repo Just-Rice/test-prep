@@ -6,7 +6,8 @@
 // entry and the profile, placement and plan settings keep whichever copy changed last; and "Reset all
 // progress" records a time, after which anything older is dropped on every device. An answer can also be
 // taken back one at a time: its identity goes on a `removed` list that every device merges, so a device still
-// holding the answer drops it instead of pushing it back.
+// holding the answer drops it instead of pushing it back. A test in the history (a mistyped official score, say) is
+// removed the same way, and flashcards keep whichever copy of each card changed last, like the mistake log.
 //
 // Cloud layout, one Firestore document per path:
 //   main       everything except answers, as JSON
@@ -20,6 +21,8 @@ import { removeMistake } from './srs.js';
 const SETTINGS = ['profile', 'placement', 'plan'];
 
 export const responseKey = r => `${r.qid}|${r.at}|${r.source}`;
+// A removed test's entry on the `removed` list. Answer keys always contain "|", so the two can't be confused.
+export const testKey = id => `test:${id}`;
 const entryTime = m => m.updatedAt ?? m.missedAt ?? 0;
 const byTimeThenKey = (x, y) => x.at - y.at || (responseKey(x) < responseKey(y) ? -1 : 1);
 
@@ -44,7 +47,7 @@ export function mergeProgress(a, b) {
 
   const tests = new Map();
   for (const t of [...(a.tests || []), ...(b.tests || [])]) {
-    if (t.at > resetAt) tests.set(t.id, t);
+    if (t.at > resetAt && !removed.has(testKey(t.id))) tests.set(t.id, t);
   }
   merged.tests = [...tests.values()].sort((x, y) => x.at - y.at);
 
@@ -53,7 +56,20 @@ export function mergeProgress(a, b) {
     const current = merged.mistakes[qid];
     if (!current || entryTime(entry) > entryTime(current)) merged.mistakes[qid] = entry;
   }
+  for (const [id, card] of [...Object.entries(a.cards || {}), ...Object.entries(b.cards || {})]) {
+    if ((card.updatedAt || 0) <= resetAt) continue;
+    const current = merged.cards[id];
+    if (!current || card.updatedAt > current.updatedAt) merged.cards[id] = card;
+  }
   return merged;
+}
+
+// Takes a test off the history on every device.
+export function removeTest(progress, id) {
+  const next = structuredClone(progress);
+  next.removed = [...new Set([...(progress.removed || []), testKey(id)])].sort();
+  next.tests = progress.tests.filter(t => t.id !== id);
+  return next;
 }
 
 // Takes answers back, as if they had never been given: they leave the history (and so the streak, the skill
@@ -76,13 +92,17 @@ export function periodOf(at) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${d.getUTCDate() <= 15 ? 1 : 2}`;
 }
 
+const sorted = entries => Object.fromEntries(Object.entries(entries).sort(([x], [y]) => (x < y ? -1 : 1)));
+
 export function toCloud(progress) {
-  const mistakes = Object.fromEntries(Object.entries(progress.mistakes || {}).sort(([x], [y]) => (x < y ? -1 : 1)));
+  const mistakes = sorted(progress.mistakes || {});
   const main = JSON.stringify({
     profile: progress.profile, placement: progress.placement, plan: progress.plan,
     stamps: progress.stamps, resetAt: progress.resetAt || 0, mistakes, tests: progress.tests,
     // Only written once something has been taken back, so everyone else's document stays exactly as it was.
     ...(progress.removed?.length ? { removed: progress.removed } : {}),
+    // Likewise only once a flashcard has been studied (so far only the MCAT has them).
+    ...(Object.keys(progress.cards || {}).length ? { cards: sorted(progress.cards) } : {}),
   });
   const groups = {};
   for (const r of [...progress.responses].sort(byTimeThenKey)) (groups[periodOf(r.at)] ||= []).push(r);

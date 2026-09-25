@@ -1,6 +1,6 @@
-// How the app looks and moves — theme, accent colour, text size, contrast and animation — plus two choices
-// about what it offers: AI help, and whether the questions written for this app are mixed in with the
-// official ones. These stay on the device and are deliberately not part of cloud sync; a phone and a
+// How the app looks and moves — theme, accent colour, text size, contrast and animation — extra time on timed
+// tests, and two choices about what it offers: AI help, and whether the questions written for this app are mixed in
+// with the official ones. These stay on the device and are deliberately not part of cloud sync; a phone and a
 // laptop can reasonably want different settings.
 //
 // Each setting becomes a data- attribute on <html>, which css/app.css styles. index.html applies the saved
@@ -8,7 +8,7 @@
 
 const KEY = 'satprep.settings.v1';
 
-export const DEFAULTS = { theme: 'system', accent: 'pencil', textsize: 'medium', contrast: 'normal', motion: 'full', explain: 'on', questions: 'auto', level: 'adaptive' };
+export const DEFAULTS = { theme: 'system', accent: 'pencil', textsize: 'medium', contrast: 'normal', motion: 'full', time: 'standard', explain: 'on', questions: 'auto', level: 'adaptive' };
 
 // [value, label, description] for each setting, in the order the Settings page shows them.
 export const CHOICES = {
@@ -37,6 +37,13 @@ export const CHOICES = {
   motion: [
     ['full', 'Full', 'Pages, cards and answers animate as they appear.'],
     ['reduced', 'Reduced', 'Almost no movement. Turned on automatically if your device asks for reduced motion.'],
+  ],
+  // Extra time on timed practice tests, for a student approved for it on test day: College Board, ACT and the AAMC
+  // all grant time and a half and double time. Only timed tests change; placement and practice aren't timed.
+  time: [
+    ['standard', 'Standard time', 'The time everyone gets on test day.'],
+    ['1.5', 'Time and a half', '50% more time for every section and module.'],
+    ['2', 'Double time', 'Twice the time for every section and module.'],
   ],
   // Turning this off means nothing is ever sent to Gemini, and the AI code is never even downloaded.
   explain: [
