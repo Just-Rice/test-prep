@@ -994,7 +994,7 @@ function questionHtml(q, st = {}) {
   }
   const original = st.revealed && q.original
     ? `<details class="original"><summary>View the original from the export</summary>${imgHtml(q.original, 'The original question')}</details>` : '';
-  const meta = st.hideMeta ? '' : `<div class="meta">${esc(q.domain)} · ${esc(skillLabel(q.skill))}${q.difficulty ? ` · ${esc(levelName(q.difficulty))}` : ''}${q.source === 'demo' ? ' · demo' : ''}</div>`;
+  const meta = st.hideMeta ? '' : `<div class="meta">${esc(q.domain)} · ${esc(skillLabel(q.skill))}${q.difficulty ? ` · ${esc(levelName(q.difficulty))}` : ''}${q.source === 'demo' ? ' · demo' : ''}${q.active ? ' · <span class="on-practice-test" title="College Board also uses this question on its official full-length practice tests">On official practice tests</span>' : ''}</div>`;
   return `<article class="question${reading ? ' split' : ''}">${meta}${reading}<div class="q-work">${prompt}${answer}${feedback}${original}</div></article>`;
 }
 
@@ -1361,10 +1361,16 @@ function viewPlaced() {
 
 // Every question available is served once before any of them comes round again, and the question just answered
 // is never the next one, so practice never repeats itself while unseen questions are still waiting.
+const studiedBefore = q => progress.responses.some(r => r.qid === q.id);
+
 function pickPracticeQuestion(section) {
   session.served ||= new Set();
   const options = { skill: session.skill || undefined, exam, difficulty: settings.level === 'adaptive' ? undefined : settings.level };
-  let q = nextPracticeQuestion(pool, progress, section, { ...options, exclude: session.served });
+  // Questions on official practice tests come last: first an unseen question from the rest, then an unseen one
+  // of those, and only then the usual repeats of questions answered before.
+  const fresh = pool.filter(q => !q.active);
+  let q = fresh.length < pool.length ? nextPracticeQuestion(fresh, progress, section, { ...options, exclude: session.served }) : null;
+  if (!q || studiedBefore(q)) q = nextPracticeQuestion(pool, progress, section, { ...options, exclude: session.served }) ?? q;
   if (!q && session.served.size) {
     session.served = new Set(session.lastId ? [session.lastId] : []);
     q = nextPracticeQuestion(pool, progress, section, { ...options, exclude: session.served });
@@ -1788,7 +1794,10 @@ function startModule() {
   const size = Math.min(format.perModule, Math.ceil(usable.length / format.modules));
   // Prefer questions not seen before this test, decided the same way for every module.
   const unseen = usable.filter(q => !s.seenBefore.has(q.id));
-  const source = unseen.length >= size * format.modules ? unseen : usable;
+  // Questions on official practice tests are left out when there are enough others, so they stay unseen.
+  const unseenFresh = unseen.filter(q => !q.active);
+  const needed = size * format.modules;
+  const source = unseenFresh.length >= needed ? unseenFresh : unseen.length >= needed ? unseen : usable;
   const questions = buildModule(source, section, s.module === 1 ? null : s.route, s.used, size, exam);
   questions.forEach(q => s.used.add(q.id));
   Object.assign(s, { section, questions, idx: 0, answers: {}, eliminated: {}, flags: new Set(), highlights: {}, times: {}, reviewScreen: false, gridOpen: false, highlightMode: false });

@@ -987,3 +987,6 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 .review-tabs { flex-wrap: wrap; }
 .review-tabs .count { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .review-tabs a.active .count { background: var(--accent-soft); color: var(--accent-ink); }
+
+/* A question College Board also uses on its official practice tests: practice shows these last. */
+.on-practice-test { display: inline-block; padding: 0 8px; border-radius: 999px; background: var(--accent-soft, var(--surface-2)); color: var(--accent-ink, var(--ink)); font-weight: 700; white-space: nowrap; }

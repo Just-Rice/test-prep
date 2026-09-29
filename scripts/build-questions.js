@@ -79,6 +79,15 @@ export async function buildQuestions({ exportsDir = join(ROOT, 'exports'), dataD
 
   if (shared) log(`${shared} question${shared === 1 ? ' is' : 's are'} in more than one test's bank, and counted in each.`);
 
+  // Questions on College Board's official full-length practice tests ("active" in the Question Bank), found by
+  // comparing each bank with an export of it made with "Exclude Active Questions" ticked, kept in
+  // exports/active-excluded/. Practice uses them last, so they are less likely to be seen before a practice test.
+  const excluded = await readExcludedExports(join(exportsDir, 'active-excluded'), cacheDir, caches, log);
+  if (excluded.length) {
+    const marked = markActive(questions.values(), excluded);
+    log(`${marked} question${marked === 1 ? ' is' : 's are'} on official practice tests, so practice uses ${marked === 1 ? 'it' : 'them'} last.`);
+  }
+
   // Remove cached results and images that no current export produces.
   const used = new Set([...questions.values()].flatMap(imagesOf).map(fileOf));
   for (const name of await readdir(cacheDir)) if (!caches.has(name)) await rm(join(cacheDir, name));
@@ -88,6 +97,71 @@ export async function buildQuestions({ exportsDir = join(ROOT, 'exports'), dataD
   await writeFile(join(dataDir, 'questions.json'), JSON.stringify({ builtAt: new Date().toISOString(), files: files.length, questions: list, warnings }));
   log(`Question library: ${list.length} questions from ${files.length} export${files.length === 1 ? '' : 's'}${warnings.length ? ` (${warnings.length} skipped; see the Library page)` : ''}.`);
   return { questions: list, warnings, files: files.length };
+}
+
+// The question IDs in each "exclude active" export, with the bank it covers, read from the text alone and cached
+// by the file's contents like the full exports.
+async function readExcludedExports(dir, cacheDir, caches, log) {
+  if (!existsSync(dir)) return [];
+  const out = [];
+  for (const file of (await readdir(dir)).filter(f => f.toLowerCase().endsWith('.pdf')).sort()) {
+    const bytes = await readFile(join(dir, file));
+    const name = `active-${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}.json`;
+    caches.add(name);
+    const cachePath = join(cacheDir, name);
+    let found = existsSync(cachePath) ? JSON.parse(await readFile(cachePath, 'utf8')) : null;
+    if (!found) {
+      log(`Reading which questions ${file} leaves out…`);
+      found = await idsInExport(bytes);
+      await writeFile(cachePath, JSON.stringify(found));
+    }
+    // An export that reads as empty would otherwise mark its whole bank as active.
+    if (found.assessment && found.section && found.ids.length) out.push({ ...found, ids: new Set(found.ids) });
+    else log(`${file}: could not tell which bank it covers or which questions it holds, so it was left out.`);
+  }
+  return out;
+}
+
+const squash = text => text.replace(/\s+/g, '');
+const BANKS = ['SAT', 'PSAT/NMSQT and PSAT 10', 'PSAT 8/9'];
+
+async function idsInExport(bytes) {
+  const loading = getDocument({ data: new Uint8Array(bytes), verbosity: 0 });
+  const doc = await loading.promise;
+  const ids = new Set();
+  let assessment = null, section = null;
+  try {
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = await doc.getPage(n);
+      const text = (await page.getTextContent()).items.map(i => i.str).join(' ');
+      for (const m of text.matchAll(/Question\s+ID:?\s*([0-9a-f]{8})/g)) ids.add(m[1]);
+      if (!assessment) {
+        const flat = squash(text);
+        const at = flat.indexOf('Difficulty');
+        if (at >= 0) {
+          const after = flat.slice(at + 'Difficulty'.length);
+          assessment = [...BANKS].sort((a, c) => c.length - a.length).find(b => after.startsWith(squash(b))) ?? null;
+          if (assessment) section = after.slice(squash(assessment).length).startsWith('ReadingandWriting') ? 'RW' : after.slice(squash(assessment).length).startsWith('Math') ? 'MATH' : null;
+        }
+      }
+      page.cleanup();
+    }
+  } finally {
+    await loading.destroy();
+  }
+  return { assessment, section, ids: [...ids] };
+}
+
+// A question is active when a bank it belongs to has an "exclude active" export and the export leaves it out.
+export function markActive(questions, excluded) {
+  let marked = 0;
+  for (const q of questions) {
+    if (!q.cbId) continue;
+    const banks = q.assessments ?? [q.assessment];
+    const active = excluded.some(e => e.section === q.section && banks.includes(e.assessment) && !e.ids.has(q.cbId));
+    if (active) { q.active = true; marked++; } else delete q.active;
+  }
+  return marked;
 }
 
 async function buildFile(bytes, fileName, imagesDir, kind) {
