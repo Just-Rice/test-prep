@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { markActive, markArabicStatements } from '../scripts/build-questions.js';
+import { markActive, markArabicStatements } from '../scripts/question-marks.js';
 
 // College Board's "Exclude Active Questions" export of a bank leaves out the questions on its official practice
 // tests, so a question in the bank but missing from that export is one of them.
