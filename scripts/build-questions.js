@@ -88,6 +88,12 @@ export async function buildQuestions({ exportsDir = join(ROOT, 'exports'), dataD
     log(`${marked} question${marked === 1 ? ' is' : 's are'} on official practice tests, so practice uses ${marked === 1 ? 'it' : 'them'} last.`);
   }
 
+  // A few College Board pictures number a question's statements 1, 2, 3 while its answer choices call them I, II,
+  // III ("I and II only"). The picture can't be changed, so those questions get a note saying which is which.
+  const numbered = await readArabicNumbering(sources.filter(s => s.kind === 'cb'), cacheDir, caches, log);
+  const noted = markArabicStatements(questions.values(), numbered);
+  if (noted) log(`${noted} question${noted === 1 ? ' numbers its' : 's number their'} statements 1, 2, 3 against answers in I, II, III, so ${noted === 1 ? 'it gets' : 'they get'} a note.`);
+
   // Remove cached results and images that no current export produces.
   const used = new Set([...questions.values()].flatMap(imagesOf).map(fileOf));
   for (const name of await readdir(cacheDir)) if (!caches.has(name)) await rm(join(cacheDir, name));
@@ -150,6 +156,77 @@ async function idsInExport(bytes) {
     await loading.destroy();
   }
   return { assessment, section, ids: [...ids] };
+}
+
+// The questions in an export whose statements are numbered 1., 2., 3. rather than I., II., III., read from the
+// text: lines are rebuilt from word positions, and only the question itself counts, not its answer or rationale.
+async function readArabicNumbering(sources, cacheDir, caches, log) {
+  const ids = new Set();
+  for (const { file, path } of sources) {
+    const bytes = await readFile(path);
+    const name = `numbering-${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}.json`;
+    caches.add(name);
+    const cachePath = join(cacheDir, name);
+    let found = existsSync(cachePath) ? JSON.parse(await readFile(cachePath, 'utf8')) : null;
+    if (!found) {
+      log(`Reading how ${file} numbers its statements…`);
+      found = await arabicNumberingInExport(bytes);
+      await writeFile(cachePath, JSON.stringify(found));
+    }
+    for (const id of found) ids.add(id);
+  }
+  return ids;
+}
+
+async function arabicNumberingInExport(bytes) {
+  const loading = getDocument({ data: new Uint8Array(bytes), verbosity: 0 });
+  const doc = await loading.promise;
+  const found = [];
+  let current = null, arabic = 0, roman = 0, done = false;
+  const finish = () => { if (current && arabic >= 2 && !roman) found.push(current); };
+  try {
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = await doc.getPage(n);
+      const rows = new Map();
+      for (const item of (await page.getTextContent()).items) {
+        if (!item.str.trim()) continue;
+        const y = Math.round(item.transform[5]);
+        const key = [...rows.keys()].find(k => Math.abs(k - y) <= 2) ?? y;
+        if (!rows.has(key)) rows.set(key, []);
+        rows.get(key).push({ x: item.transform[4], s: item.str });
+      }
+      for (const y of [...rows.keys()].sort((a, c) => c - a)) {
+        const line = rows.get(y).sort((a, c) => a.x - c.x).map(w => w.s).join(' ').replace(/\s+/g, ' ').trim();
+        const id = line.match(/^Question\s*ID:?\s*([0-9a-f]{8})/);
+        if (id) { finish(); current = id[1]; arabic = 0; roman = 0; done = false; continue; }
+        if (!current || done) continue;
+        if (/^ID:?\s*[0-9a-f]{8}\s*Answer|^Correct Answer/.test(line)) { done = true; continue; }
+        if (/^[1-4]\.(\s|$)/.test(line)) arabic++;
+        if (/^(I|II|III|IV)\.(\s|$)/.test(line)) roman++;
+      }
+      page.cleanup();
+    }
+    finish();
+  } finally {
+    await loading.destroy();
+  }
+  return found;
+}
+
+// Answer choices made only of Roman numerals and joining words: "I only", "I and II only", "Neither I nor II".
+const ROMAN_WORDS = new Set(['only', 'and', 'nor', 'neither', 'none', 'or', 'both', 'of', 'the', 'above', 'i', 'ii', 'iii', 'iv']);
+const romanChoice = text => {
+  const words = String(text ?? '').match(/[A-Za-z]+/g) ?? [];
+  return words.length > 0 && words.every(w => ROMAN_WORDS.has(w.toLowerCase())) && /\b(I|II|III)\b/.test(text);
+};
+
+export function markArabicStatements(questions, numberedIds) {
+  let marked = 0;
+  for (const q of questions) {
+    const romanAnswers = (q.choices ?? []).filter(c => romanChoice(c.text)).length >= 3;
+    if (q.cbId && numberedIds.has(q.cbId) && romanAnswers) { q.arabicStatements = true; marked++; } else delete q.arabicStatements;
+  }
+  return marked;
 }
 
 // A question is active when a bank it belongs to has an "exclude active" export and the export leaves it out.

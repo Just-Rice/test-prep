@@ -18,7 +18,12 @@ import { pictureUrl } from './library-cloud.js';
 import { hasPicture as isImportedPicture, importedPictureUrl } from './imported-library.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
-const MODEL = 'gemini-3.8-flash';   // free tier on the Gemini Developer API
+// Every model has its own free allowance on the Gemini Developer API, counted per project: in September 2026
+// 5 a minute and 20 a day for each Flash model, and 15 a minute and 500 a day for each Flash-Lite one. So when one
+// model's allowance runs out, the request moves on to the next, which gives about 1,080 a day in all instead of
+// 20. The order puts the most capable first. This applies both to the site's shared allowance, through Firebase,
+// and to a student's own key.
+export const MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 const LIMIT = 900;                  // characters of question text sent, so one question can't become a huge prompt
 
 export const explainConfigured = Boolean(FIREBASE_CONFIG);
@@ -67,8 +72,58 @@ const GENERATION = {
   thinkingConfig: { thinkingBudget: 0 },
 };
 
-let model = null;
-let loading = null;
+const models = new Map();   // one Firebase model object per model name, made when first needed
+
+// Which models are used up, for the site's allowance and for a student's own key separately, since they are
+// different projects. A daily limit lasts until Google resets it at midnight Pacific time; a per-minute one, or a
+// model that isn't available, is skipped only for a while. Kept in this browser, so a reload doesn't start again
+// from a model that is known to be used up.
+const SPENT = 'satprep.geminiSpent';
+const pacificDay = (at = Date.now()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(at);
+function readSpent() {
+  try { return JSON.parse(localStorage.getItem(SPENT) || '{}'); } catch { return {}; }
+}
+function writeSpent(spent) {
+  try { localStorage.setItem(SPENT, JSON.stringify(spent)); } catch { /* storage unavailable */ }
+}
+// Until when a model stays skipped: a millisecond time, or a Pacific date meaning "for the rest of that day".
+function skipped(scope, name, now = Date.now()) {
+  const until = readSpent()[scope]?.[name];
+  if (until == null) return false;
+  return typeof until === 'number' ? now < until : until === pacificDay(now);
+}
+function skip(scope, name, until) {
+  const spent = readSpent();
+  spent[scope] = { ...spent[scope], [name]: until };
+  writeSpent(spent);
+}
+
+// What a failed request says about its model: used up for the day, busy for the minute, not available to this
+// project, or none of these (a real failure, which trying another model won't fix).
+export function modelProblem(err) {
+  const message = String(err?.message || err);
+  if (/\b429\b|RESOURCE_EXHAUSTED|quota|exhausted/i.test(message)) return /per.?day|PerDay|daily/i.test(message) ? 'day' : 'minute';
+  if (/\b404\b|NOT_FOUND|is not found|not supported for generateContent/i.test(message)) return 'missing';
+  return null;
+}
+
+// Tries each model in turn, skipping those known to be used up, until one answers. Throws the last model's error
+// if none can.
+export async function withModels(scope, request, { now = () => Date.now() } = {}) {
+  let last = null;
+  for (const name of MODELS) {
+    if (skipped(scope, name, now())) continue;
+    try {
+      return await request(name);
+    } catch (err) {
+      const problem = modelProblem(err);
+      if (!problem) throw err;
+      last = err;
+      skip(scope, name, problem === 'day' ? pacificDay(now()) : now() + (problem === 'minute' ? 60 : 6 * 60 * 60) * 1000);
+    }
+  }
+  throw last ?? new Error('429 RESOURCE_EXHAUSTED: every Gemini model’s free allowance is used up for now');
+}
 // One answer per question is enough: asking twice costs another call and says the same thing.
 const answers = new Map();
 export const hintKey = q => `hint|${q.id}`;
@@ -100,21 +155,21 @@ async function registerAppCheck(firebaseApp) {
   });
 }
 
-async function getModel() {
-  if (model) return model;
-  loading ||= (async () => {
+let firebaseAi = null;
+
+async function getModel(name) {
+  if (models.has(name)) return models.get(name);
+  firebaseAi ||= (async () => {
     const [app, ai] = await Promise.all([import(`${SDK}/firebase-app.js`), import(`${SDK}/firebase-ai.js`)]);
     // Cloud sync may already have started the same Firebase app; reuse it rather than starting a second.
     const firebaseApp = app.getApps().length ? app.getApp() : app.initializeApp(FIREBASE_CONFIG);
     await registerAppCheck(firebaseApp);
-    const backend = ai.getAI(firebaseApp, { backend: new ai.GoogleAIBackend() });
-    model = ai.getGenerativeModel(backend, {
-      model: MODEL,
-      generationConfig: GENERATION,
-    });
-    return model;
+    return { ai, backend: ai.getAI(firebaseApp, { backend: new ai.GoogleAIBackend() }) };
   })();
-  return loading;
+  const { ai, backend } = await firebaseAi;
+  const made = ai.getGenerativeModel(backend, { model: name, generationConfig: GENERATION });
+  models.set(name, made);
+  return made;
 }
 
 // Pictures are fetched and inlined as base64. A library built on this device keeps them as files under
@@ -182,14 +237,16 @@ const answerText = q => (Array.isArray(q.answer) ? q.answer.join(' or ') : q.ans
 async function ask(instruction, q) {
   const parts = [instruction, ...(await questionParts(q))];
   const key = ownKey();
-  const text = (key ? await askWithKey(key, parts) : (await (await getModel()).generateContent(parts)).response.text()).trim();
+  const text = (key
+    ? await withModels('own', name => askWithKey(key, parts, name))
+    : await withModels('site', async name => (await (await getModel(name)).generateContent(parts)).response.text())).trim();
   if (!text) throw new Error('empty response');
   return text;
 }
 
 // The same request, made directly to the Gemini API with the student's own key.
-async function askWithKey(key, parts) {
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+async function askWithKey(key, parts, name = MODELS[0]) {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${name}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify({

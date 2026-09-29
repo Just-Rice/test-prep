@@ -995,7 +995,7 @@ function questionHtml(q, st = {}) {
   const original = st.revealed && q.original
     ? `<details class="original"><summary>View the original from the export</summary>${imgHtml(q.original, 'The original question')}</details>` : '';
   const meta = st.hideMeta ? '' : `<div class="meta">${esc(q.domain)} · ${esc(skillLabel(q.skill))}${q.difficulty ? ` · ${esc(levelName(q.difficulty))}` : ''}${q.source === 'demo' ? ' · demo' : ''}${q.active ? ' · <span class="on-practice-test" title="College Board also uses this question on its official full-length practice tests">On official practice tests</span>' : ''}</div>`;
-  return `<article class="question${reading ? ' split' : ''}">${meta}${reading}<div class="q-work">${prompt}${answer}${feedback}${original}</div></article>`;
+  return `<article class="question${reading ? ' split' : ''}">${meta}${reading}<div class="q-work">${prompt}${q.arabicStatements ? '<p class="numbering-note">The statements numbered 1, 2 and 3 here are I, II and III in the answer choices.</p>' : ''}${answer}${feedback}${original}</div></article>`;
 }
 
 // Wires up choice selection, crossing out and typed answers without re-rendering (so highlights survive).
@@ -3307,7 +3307,7 @@ function ownKeyCardHtml() {
       <h2 id="own-key-title">Your own Gemini key</h2>
       <p class="hint">${has
         ? `Hints and explanations use your own key, so they come out of your own free Gemini allowance rather than the shared ${AI_DAILY_LIMIT} a day, and work without signing in.`
-        : `Optional. Everyone shares one small free Gemini allowance, so each student gets ${AI_DAILY_LIMIT} hints and explanations a day. With a free key of your own, yours come out of your own allowance instead (about 20 a day), and work without signing in.`} ${where}</p>
+        : `Optional. Everyone shares one small free Gemini allowance, so each student gets ${AI_DAILY_LIMIT} hints and explanations a day. With a free key of your own, yours come out of your own allowance instead (over 1,000 a day, since each Gemini model has its own), and work without signing in.`} ${where}</p>
       <p class="note"><strong>Only for people 18 or older.</strong> Google’s terms for the Gemini API require you to be 18 or over to create or use a key.</p>
       ${has
         ? `<p><strong>A key is saved</strong> <span class="muted">(ending …${esc(ownKey().slice(-4))})</span></p>
