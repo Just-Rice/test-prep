@@ -1065,15 +1065,29 @@ function bindReasonPicker(qid) {
 // from someone signed out is refused. Rather than a button that can only fail, they get a link to sign in.
 const signedIn = () => syncConfigured && Boolean(syncState().account);
 // A student with their own Gemini key (Settings) uses their own allowance, so needs neither signing in nor the cap.
-const aiReady = () => settings.explain === 'on' && (Boolean(ownKey()) || (explainConfigured && signedIn()));
-const aiNeedsSignIn = () => explainConfigured && settings.explain === 'on' && syncConfigured && !signedIn() && !ownKey();
+const aiReady = () => settings.explain === 'on' && (Boolean(ownKey()) || (explainConfigured && (signedIn() || SIGNED_OUT_AI)));
+const aiNeedsSignIn = () => explainConfigured && settings.explain === 'on' && syncConfigured && !signedIn() && !ownKey() && !SIGNED_OUT_AI;
 
 const aiNoteHtml = () => (aiReady() ? '<div class="ai-note" hidden></div>' : '');
 
-// Gemini's free tier gives the whole site 20 requests a day (and 5 a minute) for the model the app uses, shared by
-// every student, so each student gets a fair share of it a day. A hint or explanation already given is shown again
-// from memory and costs nothing. Counted per account on each device; it resets at midnight.
-const AI_DAILY_LIMIT = 5;
+// Gemini's free tier gives the whole site about 1,080 requests a day across its models (js/explain.js), shared by
+// everyone, so each person gets a daily share that depends on who they are: the site's owner and the owner's
+// personal-link test account have no cap, invited testers 100, anyone else signed in 30, and someone signed out 10.
+// A hint or explanation already given is shown again from memory and costs nothing. Counted per account on each
+// device, in this browser, and reset at midnight, so it keeps usage fair rather than enforcing it.
+const AI_LIMITS = { owner: Infinity, tester: 100, signedIn: 30, signedOut: 10 };
+// Firebase AI Logic answers signed-in people only (its authenticated-users mode), so a signed-out visitor's request
+// would be refused. Their 10 a day applies only once that mode is switched off in the Firebase console and this is
+// set to true.
+const SIGNED_OUT_AI = false;
+function aiGroup() {
+  if (!signedIn()) return 'signedOut';
+  if (cloudLibrary.access === 'admin' || syncState().testAccount) return 'owner';
+  if (cloudLibrary.access === 'tester') return 'tester';
+  return 'signedIn';
+}
+const aiDailyLimit = () => AI_LIMITS[aiGroup()];
+const AI_GROUP_NAMES = { owner: 'the site’s owner', tester: 'a tester', signedIn: 'signed in', signedOut: 'not signed in' };
 const aiCountKey = () => `satprep.ai.${syncState().uid ?? 'signed-out'}`;
 function aiUsedToday() {
   try {
@@ -1086,12 +1100,12 @@ function aiUsedToday() {
 function countAiUse() {
   try { localStorage.setItem(aiCountKey(), JSON.stringify({ day: dayKey(Date.now()), used: aiUsedToday() + 1 })); } catch { /* storage unavailable */ }
 }
-const aiLeft = () => (ownKey() ? Infinity : Math.max(0, AI_DAILY_LIMIT - aiUsedToday()));
-const aiLabel = (base, key) => (ownKey() || answeredBefore(key) ? base : aiLeft() ? `${base} · ${aiLeft()} left today` : `${base} · none left today`);
+const aiLeft = () => (ownKey() ? Infinity : Math.max(0, aiDailyLimit() - aiUsedToday()));
+const aiLabel = (base, key) => (ownKey() || answeredBefore(key) || aiLeft() === Infinity ? base : aiLeft() ? `${base} · ${aiLeft()} left today` : `${base} · none left today`);
 // A hint or explain button, labeled with what is left today and switched off once it has run out.
 function aiButton(base, key, attrs) {
   const out = !aiLeft() && !answeredBefore(key);
-  return `<button type="button" class="ghost small" ${attrs} data-base="${esc(base)}" data-key="${esc(key)}"${out ? ` disabled title="Gemini’s free allowance is shared by everyone, so each student gets ${AI_DAILY_LIMIT} a day. More tomorrow."` : ''}>${esc(aiLabel(base, key))}</button>`;
+  return `<button type="button" class="ghost small" ${attrs} data-base="${esc(base)}" data-key="${esc(key)}"${out ? ` disabled title="Gemini’s free allowance is shared by everyone, so you get ${aiDailyLimit()} a day. More tomorrow."` : ''}>${esc(aiLabel(base, key))}</button>`;
 }
 
 // Runs one request and shows the answer under the question. The button stays put and reports its own progress,
@@ -1102,7 +1116,7 @@ async function showAi(button, note, run, label) {
   if (!free && !aiLeft()) {
     note.hidden = false;
     note.className = 'ai-note bad';
-    note.textContent = `That’s today’s ${AI_DAILY_LIMIT} AI hints and explanations used. Gemini’s free allowance is shared by everyone, so they come back tomorrow.`;
+    note.textContent = `That’s today’s ${aiDailyLimit()} AI hints and explanations used. Gemini’s free allowance is shared by everyone, so they come back tomorrow.`;
     return;
   }
   const original = button.textContent;
@@ -3258,7 +3272,7 @@ const SETTING_GROUPS = [
   ['contrast', 'Contrast', 'Turn this up if text or borders are hard to make out.'],
   ['motion', 'Animation', 'How much the app moves as pages and answers appear.'],
   ['time', 'Extended time', 'For timed practice tests, if you’re approved for extra time on test day. Each section’s timer, and the pace the app measures you against, get the extra time.'],
-  ['explain', 'Explain with AI', `A hint before you answer, and an explanation afterwards, written by Google’s Gemini. It needs you to be signed in, or your own Gemini key (below), and each student gets ${AI_DAILY_LIMIT} a day from the shared allowance. Questions you ask about are sent to Google.`],
+  ['explain', 'Explain with AI', `A hint before you answer, and an explanation afterwards, written by Google’s Gemini. It needs you to be signed in, or your own Gemini key (below), and each person gets a daily limit from the shared allowance, shown below. Questions you ask about are sent to Google.`],
   ['questions', 'Questions written for this app', 'Alongside the official College Board and ACT questions there are 400 SAT-style ones written for this app, each answer checked by a test. Your progress on them is kept either way.'],
 ];
 // A question the way it looks with the settings chosen, shown right under the settings that change it.
@@ -3297,6 +3311,21 @@ async function syncOwnKey(uid) {
   if (ownKey() !== here && ['settings', 'practice', 'review', 'mistakes'].includes(currentRoute)) render({ quiet: true });
 }
 
+// How many AI hints and explanations this person can expect a day, next to the setting that turns them on.
+function aiLimitHtml() {
+  const group = aiGroup();
+  const limit = AI_LIMITS[group];
+  const yours = ownKey() ? 'No limit from the app: your own key’s free allowance, about 1,080 a day.'
+    : group === 'signedOut' && !SIGNED_OUT_AI ? 'None while you’re signed out. Sign in for 30 a day, or add your own key below.'
+    : limit === Infinity ? 'No daily limit.'
+    : `About ${limit} a day, used ${aiUsedToday()} so far today.`;
+  return `<h2>Your AI limit</h2>
+      <p><strong>${yours}</strong> <span class="muted">(${esc(AI_GROUP_NAMES[group])})</span></p>
+      <p class="hint">Daily limits: the site’s owner, none; testers, 100; anyone else signed in, 30; not signed in, ${SIGNED_OUT_AI ? '10' : 'none for now'}.
+        These are estimates: everyone shares one free allowance of about 1,080 a day, so on a very busy day it can run out
+        first. A hint or explanation you’ve already had is free to see again.</p>`;
+}
+
 function ownKeyCardHtml() {
   const has = Boolean(ownKey());
   const account = signedIn();
@@ -3304,10 +3333,11 @@ function ownKeyCardHtml() {
     ? 'It’s saved to your account, so it’s there on every device you sign in to, and it’s removed from this browser when you sign out. Only you can read it; the site’s owner, who runs its database, could also see it.'
     : 'It’s saved in this browser. Sign in and it moves to your account, so it follows you to your other devices.';
   return `<section class="card own-key">
+      ${aiLimitHtml()}
       <h2 id="own-key-title">Your own Gemini key</h2>
       <p class="hint">${has
-        ? `Hints and explanations use your own key, so they come out of your own free Gemini allowance rather than the shared ${AI_DAILY_LIMIT} a day, and work without signing in.`
-        : `Optional. Everyone shares one small free Gemini allowance, so each student gets ${AI_DAILY_LIMIT} hints and explanations a day. With a free key of your own, yours come out of your own allowance instead (over 1,000 a day, since each Gemini model has its own), and work without signing in.`} ${where}</p>
+        ? 'Hints and explanations use your own key, so they come out of your own free Gemini allowance rather than the shared one, and work without signing in.'
+        : 'Optional. Everyone shares one free Gemini allowance. With a free key of your own, yours come out of your own allowance instead (over 1,000 a day, since each Gemini model has its own), and work without signing in.'} ${where}</p>
       <p class="note"><strong>Only for people 18 or older.</strong> Google’s terms for the Gemini API require you to be 18 or over to create or use a key.</p>
       ${has
         ? `<p><strong>A key is saved</strong> <span class="muted">(ending …${esc(ownKey().slice(-4))})</span></p>
