@@ -132,7 +132,33 @@ export function buildModule(pool, section, route, exclude = new Set(), size = TE
   const module = [...new Map([...picked, ...rest].map(q => [q.id, q])).values()].slice(0, size);
   // Order roughly easy to hard within each domain block, like the real test.
   const order = q => Object.keys(shares).indexOf(q.domain);
-  return module.sort((a, c) => order(a) - order(c) || b(a) - b(c));
+  return keepPassagesTogether(module.sort((a, c) => order(a) - order(c) || b(a) - b(c)));
+}
+
+// Questions that share a passage (an MCAT passage set, an ACT reading passage) belong together, as on the real
+// test, rather than scattered across the section by the sort above. Each group moves to where its first question
+// landed, in the order the questions were written.
+const passageOf = q => q.set ?? q.passage ?? null;
+const positionInSet = q => q.actNumber ?? Number(String(q.id).match(/(\d+)$/)?.[1] ?? 0);
+
+export function keepPassagesTogether(questions) {
+  const groups = new Map();
+  for (const q of questions) {
+    const key = passageOf(q);
+    if (key == null) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(q);
+  }
+  const placed = new Set();
+  const out = [];
+  for (const q of questions) {
+    const key = passageOf(q);
+    if (key == null) { out.push(q); continue; }
+    if (placed.has(key)) continue;
+    placed.add(key);
+    out.push(...[...groups.get(key)].sort((x, y) => positionInSet(x) - positionInSet(y)));
+  }
+  return out;
 }
 
 export function routeFor(module1Responses) {

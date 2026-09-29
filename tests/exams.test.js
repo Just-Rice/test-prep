@@ -84,3 +84,30 @@ test('the security rules allow progress for every test, in chunks named the way 
     assert.ok(pattern.test(periodOf(at)), periodOf(at));
   }
 });
+
+test('a timed section keeps each passage’s questions together, in order, as the real test does', async () => {
+  const { ORIGINAL_QUESTIONS } = await import('../js/questions/index.js');
+  const mcat = ORIGINAL_QUESTIONS.filter(q => q.exam === 'mcat');
+  for (const section of ['CP', 'CARS', 'BB', 'PS']) {
+    for (let run = 0; run < 20; run++) {
+      const size = EXAMS.mcat.sections.find(s => s.id === section).perModule;
+      const module = buildModule(mcat, section, null, new Set(), size, EXAMS.mcat);
+      const seen = new Set();
+      let current = null;
+      let lastInSet = 0;
+      for (const q of module) {
+        if (q.set !== current) {
+          assert.ok(!q.set || !seen.has(q.set), `${section}: ${q.set} is split up`);
+          if (q.set) seen.add(q.set);
+          current = q.set;
+          lastInSet = 0;
+        }
+        if (q.set) {
+          const n = Number(q.id.match(/(\d+)$/)[1]);
+          assert.ok(n > lastInSet, `${section}: ${q.id} out of order`);
+          lastInSet = n;
+        }
+      }
+    }
+  }
+});
