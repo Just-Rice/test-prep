@@ -782,7 +782,7 @@ function renderNav(active) {
   const streak = streakDays();
   side.innerHTML = `
     <div class="side-head">
-      <a class="brand" href="#/home">${APP_NAME}</a>
+      <a class="brand" href="#/home"><img class="brand-logo" src="img/logo-small.png" alt="" width="42" height="44"><span>${APP_NAME}</span></a>
       <button type="button" class="collapse" id="collapse" aria-label="${toggleLabel}" title="${toggleLabel}" aria-expanded="${!collapsed}">${icon('chevron')}</button>
     </div>
     ${testPickerHtml(collapsed)}
@@ -798,7 +798,7 @@ function renderNav(active) {
   const topSync = !sync ? '' : !sync.account ? '<a class="top-sync signin" href="#/account">Sign in</a>'
     : `<a class="top-sync ${syncDot}" href="#/account" aria-label="${syncText}: ${esc(sync.account)}">${sync.phase === 'error' ? 'Not saved' : sync.lastSynced ? 'Saved ✓' : 'Saving…'}</a>`;
   topbar.innerHTML = `
-    <a class="brand" href="#/home">${APP_NAME}</a>
+    <a class="brand" href="#/home"><img class="brand-logo" src="img/logo-small.png" alt="" width="42" height="44"><span>${APP_NAME}</span></a>
     <a class="top-streak${streak ? ' on' : ''}" href="#/home" aria-label="${streak ? `${streak}-day streak` : 'No streak yet'}, ${today} of ${goal} questions today">${icon('flame')}<span>${streak}</span></a>
     ${topSync}`;
 

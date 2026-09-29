@@ -103,7 +103,8 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   border-right: 1px solid var(--side-edge);
 }
 .side-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.brand { min-width: 0; overflow: hidden; font: 800 20px/1 var(--display); letter-spacing: -0.01em; color: var(--side-strong); text-decoration: none; padding: 4px 10px; white-space: nowrap; }
+.brand { min-width: 0; overflow: hidden; font: 800 20px/1 var(--display); letter-spacing: -0.01em; color: var(--side-strong); text-decoration: none; padding: 4px 10px 4px 4px; white-space: nowrap; display: flex; align-items: center; gap: 10px; }
+.brand-logo { flex: none; width: auto; height: 44px; }
 .collapse { flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--side-muted); }
 .collapse:hover:not(:disabled) { background: var(--side-raise); color: var(--side-strong); }
 .collapse .icon { width: 18px; height: 18px; transition: transform 0.18s ease; }
@@ -184,7 +185,8 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
     height: 56px; padding: 0 8px 0 max(16px, env(safe-area-inset-left)); background: var(--side); color: var(--side-ink);
     border-bottom: 1px solid var(--side-edge);
   }
-  .topbar .brand { font-size: 18px; padding: 0; margin-right: auto; }
+  .topbar .brand { font-size: 18px; padding: 0; margin-right: auto; gap: 8px; }
+  .topbar .brand-logo { height: 36px; }
   .top-streak { display: flex; align-items: center; gap: 4px; padding: 8px 10px; color: var(--side-muted); font-weight: 700; font-size: 16px; text-decoration: none; font-variant-numeric: tabular-nums; }
   .top-streak .icon { width: 20px; height: 20px; }
   .top-streak.on { color: var(--side-strong); }
