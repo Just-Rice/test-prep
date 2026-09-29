@@ -995,3 +995,6 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 
 /* Under a College Board picture that numbers its statements 1, 2, 3 while the answers say I, II, III. */
 .numbering-note { margin: 8px 0 12px; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--accent-soft); color: var(--ink); font-size: 14px; border-radius: 0 6px 6px 0; }
+
+/* A setting that can't be used yet (AI hints while signed out): greyed out, with a note saying why. */
+.setting.locked .swatch { opacity: 0.45; cursor: not-allowed; }

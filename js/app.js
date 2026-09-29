@@ -1072,13 +1072,12 @@ const aiNoteHtml = () => (aiReady() ? '<div class="ai-note" hidden></div>' : '')
 
 // Gemini's free tier gives the whole site about 1,080 requests a day across its models (js/explain.js), shared by
 // everyone, so each person gets a daily share that depends on who they are: the site's owner and the owner's
-// personal-link test account have no cap, invited testers 100, anyone else signed in 30, and someone signed out 10.
-// A hint or explanation already given is shown again from memory and costs nothing. Counted per account on each
-// device, in this browser, and reset at midnight, so it keeps usage fair rather than enforcing it.
-const AI_LIMITS = { owner: Infinity, tester: 100, signedIn: 30, signedOut: 10 };
-// Firebase AI Logic answers signed-in people only (its authenticated-users mode), so a signed-out visitor's request
-// would be refused. Their 10 a day applies only once that mode is switched off in the Firebase console and this is
-// set to true.
+// personal-link test account have no cap, invited testers 100, and anyone else signed in 30. Signed-out visitors get
+// none: Firebase AI Logic answers signed-in people only (its authenticated-users mode), which the owner chose to keep
+// so strangers can't use up the shared allowance. A hint or explanation already given is shown again from memory and
+// costs nothing. Counted per account on each device, in this browser, and reset at midnight, so it keeps usage fair
+// rather than enforcing it.
+const AI_LIMITS = { owner: Infinity, tester: 100, signedIn: 30, signedOut: 0 };
 const SIGNED_OUT_AI = false;
 function aiGroup() {
   if (!signedIn()) return 'signedOut';
@@ -3321,7 +3320,7 @@ function aiLimitHtml() {
     : `About ${limit} a day, used ${aiUsedToday()} so far today.`;
   return `<h2>Your AI limit</h2>
       <p><strong>${yours}</strong> <span class="muted">(${esc(AI_GROUP_NAMES[group])})</span></p>
-      <p class="hint">Daily limits: the site’s owner, none; testers, 100; anyone else signed in, 30; not signed in, ${SIGNED_OUT_AI ? '10' : 'none for now'}.
+      <p class="hint">Daily limits: the site’s owner, none; testers, 100; anyone else signed in, 30; not signed in, none (sign in to use them).
         These are estimates: everyone shares one free allowance of about 1,080 a day, so on a very busy day it can run out
         first. A hint or explanation you’ve already had is free to see again.</p>`;
 }
@@ -3409,15 +3408,19 @@ function viewSettings() {
         // Without any official questions the written ones are all there is, so the choice would do nothing.
         && (key !== 'questions' || allQuestions.some(isOfficial))).map(([key, title, note]) => {
         // Until one is picked, the choice showing is the one this account gets on its own.
-        const current = key === 'questions' ? (includesWritten() ? 'on' : 'off') : settings[key];
+        // AI hints need an account (or the student's own key), so signed out the choice is greyed out rather than
+        // looking switched on while nothing would work.
+        const locked = key === 'explain' && !signedIn() && !ownKey();
+        const current = locked ? null : key === 'questions' ? (includesWritten() ? 'on' : 'off') : settings[key];
         const auto = key === 'questions' && settings.questions === 'auto';
         return `
-        <section class="card setting">
+        <section class="card setting${locked ? ' locked' : ''}">
           <h3 id="set-${key}">${title}</h3>
           <p class="hint">${note}${auto ? ` Set for your account${invitedToLibrary() ? ', because you have the official library' : ''}; pick one to choose for yourself.` : ''}</p>
-          <div class="swatches" role="radiogroup" aria-labelledby="set-${key}">
+          ${locked ? '<p class="note">You need to be signed in to use AI hints and explanations. <a href="#/account">Sign in</a>, or add your own Gemini key below.</p>' : ''}
+          <div class="swatches" role="radiogroup" aria-labelledby="set-${key}"${locked ? ' aria-disabled="true"' : ''}>
             ${CHOICES[key].map(([value, label, about]) => `
-              <button type="button" class="swatch${current === value ? ' on' : ''}" role="radio"
+              <button type="button" class="swatch${current === value ? ' on' : ''}" role="radio"${locked ? ' disabled' : ''}
                 aria-checked="${current === value}" data-set="${key}" data-value="${value}" data-preview="${value}">
                 ${key === 'accent' ? '<i class="swatch-dot" aria-hidden="true"></i>' : ''}
                 <span class="swatch-name"${key === 'textsize' ? ` style="font-size:${{ small: 13, medium: 15, large: 17, xlarge: 19 }[value]}px"` : ''}>${esc(label)}</span>
@@ -3428,7 +3431,7 @@ function viewSettings() {
       }).join('');
       return cards ? `<h2 class="settings-heading">${heading}</h2><div class="settings-grid">${cards}</div>${heading === 'Accessibility' ? SAMPLE_CARD : ''}` : '';
     }).join('')}
-    ${settings.explain === 'on' ? ownKeyCardHtml() : ''}
+    ${settings.explain === 'on' || (!signedIn() && !ownKey()) ? ownKeyCardHtml() : ''}
     <h2 class="settings-heading">This browser</h2>
     <div class="settings-grid"><section class="card setting">
       <h3>Open in an about:blank tab</h3>
