@@ -98,12 +98,14 @@ function skip(scope, name, until) {
   writeSpent(spent);
 }
 
-// What a failed request says about its model: used up for the day, busy for the minute, not available to this
-// project, or none of these (a real failure, which trying another model won't fix).
+// What a failed request says about its model: used up for the day, busy for the minute (or overloaded), not
+// available to this project, or none of these (a real failure, which trying another model won't fix).
 export function modelProblem(err) {
   const message = String(err?.message || err);
   if (/\b429\b|RESOURCE_EXHAUSTED|quota|exhausted/i.test(message)) return /per.?day|PerDay|daily/i.test(message) ? 'day' : 'minute';
   if (/\b404\b|NOT_FOUND|is not found|not supported for generateContent/i.test(message)) return 'missing';
+  // An overloaded model ("high demand", 503) is busy for everyone, not just this project: try the next one.
+  if (/\b50[03]\b|UNAVAILABLE|overloaded|high demand/i.test(message)) return 'minute';
   return null;
 }
 

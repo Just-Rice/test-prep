@@ -57,3 +57,9 @@ test('when every model is used up, the last model’s error is reported', async 
   await assert.rejects(withModels('site', async name => { tried.push(name); return 'ok'; }), /used up/);
   assert.equal(tried.length, 0, 'nothing is asked while all are known to be used up');
 });
+
+test('an overloaded model hands the request to the next one', async () => {
+  assert.equal(modelProblem(new Error('[503 ] The model is overloaded. Please try again later.')), 'minute');
+  const answer = await withModels('site', async name => { if (name === MODELS[0]) throw new Error('[503 ] UNAVAILABLE: high demand'); return name; });
+  assert.equal(answer, MODELS[1]);
+});

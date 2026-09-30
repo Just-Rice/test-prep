@@ -1079,10 +1079,26 @@ const aiNoteHtml = () => (aiReady() ? '<div class="ai-note" hidden></div>' : '')
 // rather than enforcing it.
 const AI_LIMITS = { owner: Infinity, tester: 100, signedIn: 30, signedOut: 0 };
 const SIGNED_OUT_AI = false;
+// Whether an account is the admin or a tester is only known once the library check finishes, a moment after the page
+// opens, so the last answer for this account is remembered: until then its limit would otherwise show as 30.
+const KNOWN_ACCESS = 'satprep.libraryAccess';
+function rememberAccess(uid, access) {
+  try { localStorage.setItem(KNOWN_ACCESS, JSON.stringify({ uid, access })); } catch { /* storage unavailable */ }
+}
+function knownAccess() {
+  if (cloudLibrary.access) return cloudLibrary.access;
+  try {
+    const saved = JSON.parse(localStorage.getItem(KNOWN_ACCESS));
+    return saved?.uid && saved.uid === syncState().uid ? saved.access : null;
+  } catch {
+    return null;
+  }
+}
 function aiGroup() {
   if (!signedIn()) return 'signedOut';
-  if (cloudLibrary.access === 'admin' || syncState().testAccount) return 'owner';
-  if (cloudLibrary.access === 'tester') return 'tester';
+  const access = knownAccess();
+  if (access === 'admin' || syncState().testAccount) return 'owner';
+  if (access === 'tester') return 'tester';
   return 'signedIn';
 }
 const aiDailyLimit = () => AI_LIMITS[aiGroup()];
@@ -3768,6 +3784,7 @@ async function syncCloudLibrary({ uid }) {
     if (stale()) return;
     if (JOIN_ROUTES.includes(currentRoute)) render({ quiet: true });
   }
+  rememberAccess(uid, access);
   if (!access) {
     const had = dropCloudQuestions();
     cloudLibrary = { status: 'not-invited', access: null };
