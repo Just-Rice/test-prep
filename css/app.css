@@ -1001,7 +1001,7 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 .setting.locked .swatch { opacity: 0.45; cursor: not-allowed; }
 
 /* ---------- touch targets ---------- */
-/* On a touch screen every control is at least 44px each way, the size a fingertip needs to hit it reliably.
+/* On a touch screen controls are at least 44px tall (and the narrow ones 44px wide), the size a fingertip needs.
    A mouse is precise, so desktop layouts keep their own sizes. */
 @media (pointer: coarse) {
   button, .button, .seg a, select, .topbar .brand, .top-sync, .top-streak,
