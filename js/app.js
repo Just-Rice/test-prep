@@ -3689,8 +3689,9 @@ function bindSignInForms() {
 // ---------- boot ----------
 
 // The server builds data/questions.json from exports/ at startup; without it the demo questions are used.
+// GitHub Pages never has one (data/ is gitignored), so the site there doesn't ask and log a 404 on every visit.
 async function loadLibrary() {
-  try {
+  if (!location.hostname.endsWith('.github.io')) try {
     const res = await fetch('data/questions.json', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();

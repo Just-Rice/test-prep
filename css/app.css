@@ -1006,7 +1006,9 @@ details.mistake[open] summary { border-radius: 12px 12px 0 0; }
 @media (pointer: coarse) {
   button, .button, .seg a, select, .topbar .brand, .top-sync, .top-streak,
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) { min-height: 44px; }
-  .strike, .zoom-btn.icon-only, .top-sync { min-width: 44px; }
+  .strike, .zoom-btn.icon-only, .top-sync, .collapse { min-width: 44px; }
+  /* A tablet held sideways is wide enough for the sidebar. */
+  .side-nav a, .sync { min-height: 44px; }
   .zoom-btn.icon-only { height: 44px; }
   .hint-signin { display: inline-flex; align-items: center; min-height: 44px; }
   /* Resource and lesson links sit in a list with room between them: the padding widens what a tap hits, and the
