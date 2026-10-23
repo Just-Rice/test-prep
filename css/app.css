@@ -238,6 +238,9 @@ input, select { font: inherit; padding: 9px 12px; border-radius: 10px; border: 1
 input:focus-visible, select:focus-visible { outline-offset: 0; }
 .field { display: grid; gap: 4px; margin-bottom: 14px; font-weight: 600; font-size: 14px; }
 .field input { font-weight: 400; font-size: 16px; width: 100%; max-width: 300px; }
+ul.plain { list-style: none; padding: 0; margin: 0 0 16px; display: grid; gap: 4px; }
+.login-form { border-top: 1px solid var(--rule); padding-top: 14px; }
+.login-form h3 { margin-top: 0; }
 
 /* ---------- surfaces ---------- */
 .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }

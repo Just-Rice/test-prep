@@ -249,6 +249,65 @@ export async function signInWithUsername(username, passcode, { create = false } 
   await authAction(() => action(fb.authInstance, email, passcode));
 }
 
+// ---------- managing the signed-in account ----------
+//
+// An account can have Google, a username and password, or both. Someone who signed in with Google can add a
+// username and password, which then sign in to the same account; someone with a username can change it or its
+// password, after giving the current password (Firebase wants a recent sign-in for both).
+
+const USERNAME_RULE = /^[a-z0-9][a-z0-9._-]{2,29}$/;
+const usernameFromEmail = email => (email?.endsWith(`@${USERNAME_DOMAIN}`) ? email.slice(0, -(USERNAME_DOMAIN.length + 1)) : null);
+
+export function accountDetails() {
+  if (!user) return null;
+  const provider = id => user.providerData.find(p => p.providerId === id);
+  return {
+    google: provider('google.com')?.email || (provider('google.com') ? 'your Google account' : null),
+    username: provider('password') ? usernameFromEmail(provider('password').email || user.email) : null,
+  };
+}
+
+function checkUsername(username) {
+  const name = String(username).trim().toLowerCase();
+  if (!USERNAME_RULE.test(name)) throw new Error('Usernames are 3–30 characters: letters, numbers, dots, dashes or underscores.');
+  return name;
+}
+
+// Adds a username and password to an account that has only Google.
+export async function addUsernameLogin(username, passcode) {
+  const name = checkUsername(username);
+  if (passcode.length < 6) throw new Error('Choose a password of at least 6 characters.');
+  const { EmailAuthProvider, linkWithCredential } = fb.auth;
+  await authAction(() => linkWithCredential(user, EmailAuthProvider.credential(`${name}@${USERNAME_DOMAIN}`, passcode)));
+  await user.reload();
+  update({});
+}
+
+// Changes the username, the password, or both. Blank means keep it.
+export async function changeUsernameLogin(currentPasscode, { username = '', passcode = '' } = {}) {
+  const current = accountDetails()?.username;
+  const name = username.trim() ? checkUsername(username) : current;
+  if (passcode && passcode.length < 6) throw new Error('Choose a password of at least 6 characters.');
+  if (name === current && !passcode) throw new Error('Enter a new username or a new password.');
+  const { EmailAuthProvider, reauthenticateWithCredential, updateEmail, updatePassword } = fb.auth;
+  const credential = EmailAuthProvider.credential(`${current}@${USERNAME_DOMAIN}`, currentPasscode);
+  await authAction(() => reauthenticateWithCredential(user, credential)).catch(err => {
+    throw new Error(err.message === NO_MATCH ? 'Your current password isn’t right.' : err.message);
+  });
+  if (name !== current) {
+    try {
+      await updateEmail(user, `${name}@${USERNAME_DOMAIN}`);
+    } catch (err) {
+      throw new Error(err?.code === 'auth/operation-not-allowed'
+        ? 'The Firebase project doesn’t allow changing usernames while email enumeration protection is on (Authentication → Settings).'
+        : describeError(err));
+    }
+  }
+  if (passcode) await authAction(() => updatePassword(user, passcode));
+  await user.reload();
+  update({});
+}
+
 // ---------- the owner's test account ----------
 //
 // The owner's personal link signs a browser in to one test account, kept for trying the app the way a tester would:

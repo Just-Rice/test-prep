@@ -17,7 +17,7 @@ import { MCAT_PS_LESSONS } from './lessons/mcat-ps.js';
 import { mountCalculator } from './calc.js';
 import { currentStreak, dayKey, longestStreak } from './streak.js';
 import {
-  changeTestAccountPasscode, initSync, readAccountKey, schedulePush, signInToTestAccount, signInWithGoogle, signInWithUsername,
+  accountDetails, addUsernameLogin, changeTestAccountPasscode, changeUsernameLogin, initSync, readAccountKey, schedulePush, signInToTestAccount, signInWithGoogle, signInWithUsername,
   signOutOfSync, syncConfigured, syncState, TEST_ID_LENGTH, writeAccountKey,
 } from './sync.js';
 import {
@@ -3625,7 +3625,9 @@ function viewAccount() {
           <button class="danger" id="sign-out-clear">Sign out and clear this device</button>
         </div>
         <p class="hint">Signing out keeps a copy of your progress on this device, but it is never added to a different account that signs in here. On a shared computer, “Sign out and clear this device” removes it straight away.</p>
-      </div>`;
+      </div>
+      ${sync.testAccount ? '' : loginDetailsHtml()}`;
+    if (!sync.testAccount) bindLoginDetails();
     on('#sign-out', 'click', () => signOutOfSync());
     confirmButton('#sign-out-clear', 'Click again to sign out and clear', async () => {
       await signOutOfSync();
@@ -3643,6 +3645,60 @@ function viewAccount() {
     <p class="muted">Keep your progress on every device you study on. Progress already on this device is added to your account.</p>
     ${signInFormsHtml(sync)}`;
   bindSignInForms();
+}
+
+// How this account signs in, with a form to add a username and password to a Google account, or to change them.
+function loginDetailsHtml() {
+  const { google, username } = accountDetails() ?? {};
+  const form = username
+    ? `<form id="login-form" class="login-form">
+        <h3>Change your username or password</h3>
+        <label class="field">New username <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="${esc(username)}"></label>
+        <label class="field">New password <input name="passcode" type="password" autocomplete="new-password" placeholder="Leave blank to keep it"></label>
+        <label class="field">Current password <input name="current" type="password" autocomplete="current-password" required></label>
+        <div class="actions"><button class="primary">Save changes</button></div>
+      </form>`
+    : `<form id="login-form" class="login-form">
+        <h3>Add a username and password</h3>
+        <p class="hint">Then you can sign in either way, for instance where Google sign-in doesn’t work.</p>
+        <label class="field">Username <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+        <label class="field">Password <input name="passcode" type="password" autocomplete="new-password" required></label>
+        <div class="actions"><button class="primary">Add</button></div>
+      </form>`;
+  return `<div class="card">
+      <h2>Sign-in details</h2>
+      <ul class="plain">
+        <li>Google: ${google ? `<strong>${esc(google)}</strong>` : '<span class="muted">not connected</span>'}</li>
+        <li>Username: ${username ? `<strong>${esc(username)}</strong>` : '<span class="muted">none yet</span>'}</li>
+      </ul>
+      ${form}
+      <p class="warn" id="login-error" role="alert"></p>
+      <p class="hint">A forgotten password can’t be recovered, so keep it somewhere safe.</p>
+    </div>`;
+}
+
+function bindLoginDetails() {
+  on('#login-form', 'submit', async e => {
+    e.preventDefault();
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
+    const button = formEl.querySelector('button');
+    button.disabled = true;
+    $('#login-error').textContent = '';
+    try {
+      if (accountDetails()?.username) {
+        await changeUsernameLogin(form.get('current'), { username: form.get('username'), passcode: form.get('passcode') });
+      } else {
+        await addUsernameLogin(form.get('username'), form.get('passcode'));
+      }
+      toast('Saved');
+      if (currentRoute === 'account') viewAccount();
+    } catch (err) {
+      if (!view.contains($('#login-error'))) return;
+      $('#login-error').textContent = err.message;
+      button.disabled = false;
+    }
+  });
 }
 
 // Signing in, as the Account page and the tester link both offer it.
@@ -3871,7 +3927,9 @@ loadLibrary().then(result => {
       if (state.account && state.phase === 'synced' && lastPhase === 'syncing' && !state.lastSyncedToastShown) toast('Synced');
       lastPhase = state.account ? (lastPhase === 'synced' ? 'synced' : state.phase) : null;
       renderNav(currentRoute);
-      if (currentRoute === 'account') quietly(viewAccount);
+      // Drawing the page again would throw away a half-typed change to the username or password.
+      const typing = state.uid === lastUid && [...view.querySelectorAll('#login-form input')].some(i => i.value);
+      if (currentRoute === 'account' && !typing) quietly(viewAccount);
       // Hints are offered only when signed in, and a returning student's sign-in is restored a moment after the
       // first page is drawn, so a question page drawn in that moment offered "Sign in for hints" to someone
       // who was. Draw it again, quietly, whenever signing in or out changes which one it should show.
