@@ -3659,7 +3659,7 @@ function loginDetailsHtml() {
   const form = username
     ? `<form id="login-form" class="login-form">
         <h3>Change your username or password</h3>
-        <label class="field">New username <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="${esc(username)}"></label>
+        <label class="field">New username <input name="username" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="${esc(username)}"></label>
         <label class="field">New password <input name="passcode" type="password" autocomplete="new-password" placeholder="Leave blank to keep it"></label>
         <label class="field">Current password <input name="current" type="password" autocomplete="current-password" required></label>
         <label class="show-pass"><input type="checkbox" data-show-pass> Show password</label>
@@ -3668,7 +3668,7 @@ function loginDetailsHtml() {
     : `<form id="login-form" class="login-form">
         <h3>Add a username and password</h3>
         <p class="hint">Then you can sign in either way, for instance where Google sign-in doesn’t work.</p>
-        <label class="field">Username <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+        <label class="field">Username <input name="username" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>
         <label class="field">Password <input name="passcode" type="password" autocomplete="new-password" required></label>
         <label class="show-pass"><input type="checkbox" data-show-pass> Show password</label>
         <div class="actions"><button class="primary">Add</button></div>

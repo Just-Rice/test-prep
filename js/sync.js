@@ -239,10 +239,7 @@ export async function signInWithGoogle() {
 }
 
 export async function signInWithUsername(username, passcode, { create = false } = {}) {
-  const name = String(username).trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9._-]{2,29}$/.test(name)) {
-    throw new Error('Usernames are 3–30 characters: letters, numbers, dots, dashes or underscores.');
-  }
+  const name = checkUsername(username);
   if (create && passcode.length < 6) throw new Error('Choose a password of at least 6 characters.');
   const email = `${name}@${USERNAME_DOMAIN}`;
   const action = create ? fb.auth.createUserWithEmailAndPassword : fb.auth.signInWithEmailAndPassword;
@@ -267,10 +264,20 @@ export function accountDetails() {
   };
 }
 
+// Says what is wrong with a username, rather than only what the rule is, so it's clear what to change: a browser
+// that fills in an email address, or a space, is easy to miss.
 function checkUsername(username) {
-  const name = String(username).trim().toLowerCase();
-  if (!USERNAME_RULE.test(name)) throw new Error('Usernames are 3–30 characters: letters, numbers, dots, dashes or underscores.');
-  return name;
+  const name = String(username ?? '').trim().toLowerCase();
+  if (USERNAME_RULE.test(name)) return name;
+  const bad = [...new Set(name.match(/[^a-z0-9._-]/g) ?? [])];
+  const shown = bad.map(c => (c === ' ' ? 'spaces' : `“${c}”`)).join(', ');
+  throw new Error(
+    !name ? 'Enter a username.'
+      : name.includes('@') ? `“${name}” looks like an email address. A username is just a name, like ${name.split('@')[0].replace(/[^a-z0-9._-]/g, '') || 'alex.k'}: letters, numbers, dots, dashes or underscores, without the “@…” part.`
+      : bad.length ? `A username can’t have ${shown} in it. Use letters, numbers, dots, dashes or underscores.`
+      : name.length < 3 ? 'A username needs at least 3 characters.'
+      : name.length > 30 ? 'A username can be at most 30 characters.'
+      : 'A username has to start with a letter or a number.');
 }
 
 // Adds a username and password to an account that has only Google.
