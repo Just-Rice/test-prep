@@ -597,6 +597,12 @@ function frameNoteHtml() {
 document.addEventListener('click', e => {
   if (e.target.closest('[data-open-blank]')) openInBlankTab(e.target.closest('[data-open-blank]').dataset.openBlank || currentRoute || 'home');
 });
+// "Show password" turns every password box in its form into plain text, and back.
+document.addEventListener('change', e => {
+  if (!e.target.matches('[data-show-pass]')) return;
+  e.target.closest('form')?.querySelectorAll('input[name="passcode"], input[name="current"]')
+    .forEach(input => { input.type = e.target.checked ? 'text' : 'password'; });
+});
 document.addEventListener('click', e => {
   if (!e.target.closest('[data-frame-note-dismiss]')) return;
   frameNoteDismissed = true;
@@ -3656,6 +3662,7 @@ function loginDetailsHtml() {
         <label class="field">New username <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="${esc(username)}"></label>
         <label class="field">New password <input name="passcode" type="password" autocomplete="new-password" placeholder="Leave blank to keep it"></label>
         <label class="field">Current password <input name="current" type="password" autocomplete="current-password" required></label>
+        <label class="show-pass"><input type="checkbox" data-show-pass> Show password</label>
         <div class="actions"><button class="primary">Save changes</button></div>
       </form>`
     : `<form id="login-form" class="login-form">
@@ -3663,6 +3670,7 @@ function loginDetailsHtml() {
         <p class="hint">Then you can sign in either way, for instance where Google sign-in doesn’t work.</p>
         <label class="field">Username <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
         <label class="field">Password <input name="passcode" type="password" autocomplete="new-password" required></label>
+        <label class="show-pass"><input type="checkbox" data-show-pass> Show password</label>
         <div class="actions"><button class="primary">Add</button></div>
       </form>`;
   return `<div class="card">
@@ -3713,6 +3721,7 @@ function signInFormsHtml(sync) {
         <h2>Username and password</h2>
         <label class="field">Username <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
         <label class="field">Password <input name="passcode" type="password" autocomplete="current-password" required></label>
+        <label class="show-pass"><input type="checkbox" data-show-pass> Show password</label>
         <div class="actions"><button class="primary" data-mode="sign-in">Sign in</button><button data-mode="create">Create account</button></div>
         <p class="hint">A forgotten password can’t be recovered, so keep it somewhere safe.</p>
       </form>
